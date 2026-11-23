@@ -69,6 +69,37 @@ pub struct GlobalConfig {
     pub sr_auto_calibration: SrAutoCalibrationConfig,
     #[serde(default)]
     pub card_info_service: CardInfoServiceConfig,
+    /// Scoring-context TTL settings; defaults apply when the section is missing.
+    #[serde(default)]
+    pub scoring_data: ScoringDataConfig,
+}
+
+/// `[scoring_data]`: the default and max TTL of the scoring context `/decide` stores in Redis.
+#[derive(Clone, serde::Deserialize, Debug)]
+#[serde(default)]
+pub struct ScoringDataConfig {
+    pub default_ttl_secs: i64,
+    pub max_ttl_secs: i64,
+}
+
+// 30 minutes by default, 3 days at most, when the config leaves them out.
+impl Default for ScoringDataConfig {
+    fn default() -> Self {
+        Self {
+            default_ttl_secs: 1_800,
+            max_ttl_secs: 259_200,
+        }
+    }
+}
+
+impl ScoringDataConfig {
+    /// The merchant's own TTL if set, else the default, never more than the max.
+    pub fn ttl_secs(&self, merchant_ttl: Option<i64>) -> i64 {
+        merchant_ttl
+            .filter(|ttl| *ttl > 0)
+            .unwrap_or(self.default_ttl_secs)
+            .min(self.max_ttl_secs)
+    }
 }
 
 /// Configuration for the external Hyperswitch cards-info API used to enrich a payment's
@@ -408,6 +439,8 @@ pub struct TenantConfig {
     pub cost_ingestion: CostIngestionConfig,
     pub volume_commitment: VolumeCommitmentConfig,
     pub card_info_service: CardInfoServiceConfig,
+    /// Scoring-context TTL settings, copied from the global config.
+    pub scoring_data: ScoringDataConfig,
 }
 
 /// Deployment-level mechanics for volume commitment routing; everything per-merchant arrives
@@ -687,6 +720,7 @@ impl TenantConfig {
             cost_ingestion: global_config.cost_ingestion.clone(),
             volume_commitment: global_config.volume_commitment.clone(),
             card_info_service: global_config.card_info_service.clone(),
+            scoring_data: global_config.scoring_data.clone(),
         }
     }
 }
@@ -1276,6 +1310,21 @@ impl GlobalConfig {
                 )
             ));
         }
+        // The scoring-context TTLs must satisfy 0 < default_ttl_secs <= max_ttl_secs.
+        if self.scoring_data.max_ttl_secs <= 0 {
+            return Err(error_stack::report!(
+                error::ConfigurationError::InvalidConfigurationValueError(
+                    "scoring_data.max_ttl_secs".to_string(),
+                )
+            ));
+        }
+        if !(1..=self.scoring_data.max_ttl_secs).contains(&self.scoring_data.default_ttl_secs) {
+            return Err(error_stack::report!(
+                error::ConfigurationError::InvalidConfigurationValueError(
+                    "scoring_data.default_ttl_secs".to_string(),
+                )
+            ));
+        }
         Ok(())
     }
 }
@@ -1365,6 +1414,29 @@ mod tests {
             }
             _ => assert!(false),
         }
+    }
+
+    // A merchant's TTL is used as is, or cut to the max when above it.
+    #[test]
+    fn scoring_data_ttl_is_the_merchants_capped_at_the_max() {
+        let config = ScoringDataConfig {
+            default_ttl_secs: 1_800,
+            max_ttl_secs: 259_200,
+        };
+        assert_eq!(config.ttl_secs(Some(172_800)), 172_800);
+        assert_eq!(config.ttl_secs(Some(10_000_000)), 259_200);
+    }
+
+    // No TTL, or one that isn't positive, falls back to the default.
+    #[test]
+    fn scoring_data_ttl_falls_back_to_the_default() {
+        let config = ScoringDataConfig {
+            default_ttl_secs: 3_600,
+            max_ttl_secs: 7_200,
+        };
+        assert_eq!(config.ttl_secs(None), 3_600);
+        assert_eq!(config.ttl_secs(Some(0)), 3_600);
+        assert_eq!(config.ttl_secs(Some(-5)), 3_600);
     }
 }
 

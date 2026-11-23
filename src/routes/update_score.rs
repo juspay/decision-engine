@@ -251,6 +251,7 @@ pub async fn update_score(
                     crate::analytics::FlowType::UpdateScoreLegacyScoreSnapshot,
                 ),
                 redis_comp_config_final,
+                None,
             )
             .await;
 

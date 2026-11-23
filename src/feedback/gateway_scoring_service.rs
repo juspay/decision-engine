@@ -27,7 +27,7 @@ use crate::decider::gatewaydecider::gw_scoring::get_metric_entry_data;
 use crate::app::get_tenant_app_state;
 use crate::decider::gatewaydecider::constants::{self as DC, SR_V3_DEFAULT_INPUT_CONFIG};
 use crate::decider::gatewaydecider::types as T;
-use crate::decider::gatewaydecider::types::GatewayScoringData;
+use crate::decider::gatewaydecider::types::{GatewayScoringData, StoredGatewayScoringData};
 use crate::decider::gatewaydecider::types::{RoutingFlowType as RF, SrRoutingDimensions};
 use crate::decider::gatewaydecider::utils::{
     self as GU, get_m_id, get_payment_method, get_sr_v3_latency_threshold,
@@ -81,7 +81,6 @@ use serde::{Deserialize, Serialize};
 
 use super::constants::{
     default_sr_v3_latency_threshold_in_secs, GsmBasedScoringFilterEnabledMerchant, SrV3InputConfig,
-    UpdateGatewayScoreLockFlagTtl, UpdateScoreLockFeatureEnabledMerchant,
 };
 use super::utils::get_time_from_txn_created_in_mills;
 use crate::logger;
@@ -265,7 +264,7 @@ pub fn txn_failure_states() -> Vec<TxnStatus> {
 
 pub async fn check_and_send_should_update_gateway_score(
     lock_key: String,
-    lock_key_ttl: i32,
+    lock_key_ttl: i64,
     redis_comp_config: Option<RedisCompressionConfigCombined>,
 ) -> bool {
     let app_state = get_tenant_app_state().await;
@@ -274,7 +273,7 @@ pub async fn check_and_send_should_update_gateway_score(
         .setXWithOption(
             lock_key.as_str(),
             "true",
-            lock_key_ttl as i64,
+            lock_key_ttl,
             SetOptions::NX,
             redis_comp_config,
             RedisDataStruct::STRING,
@@ -320,12 +319,20 @@ pub async fn get_gateway_scoring_type(
     }
 
     let txn_status = txn_detail.status.clone();
-    let merchant_id = txn_detail.merchantId.clone();
-    let is_success = is_transaction_success(txn_status.clone());
-    let is_failure = is_transaction_failure(txn_status.clone());
+    let merchant_id = get_m_id(txn_detail.merchantId.clone());
+    if is_transaction_success(txn_status.clone()) {
+        return GatewayScoringType::Reward;
+    }
+    if is_transaction_failure(txn_status) {
+        return GatewayScoringType::PenaliseSrv3;
+    }
+    // A pending update changes no SR score unless the latency threshold is on and has passed.
+    if !is_latency_threshold_enabled(merchant_id.clone()).await {
+        return GatewayScoringType::Penalise;
+    }
     let time_difference = get_time_from_txn_created_in_mills(txn_detail.clone());
     let merchant_sr_v3_input_config =
-        findByNameFromRedis(SrV3InputConfig(get_m_id(merchant_id)).get_key()).await;
+        findByNameFromRedis(SrV3InputConfig(merchant_id).get_key()).await;
     let pmt = txn_card_info.instrument.method_code();
     let pm = get_payment_method(
         pmt.to_string(),
@@ -372,33 +379,36 @@ pub async fn get_gateway_scoring_type(
         time_difference
     );
 
-    if is_success {
-        GatewayScoringType::Reward
-    } else if is_failure {
-        GatewayScoringType::PenaliseSrv3
-    } else if time_difference < ((time_difference_threshold * 1000.0) as u128) {
+    if time_difference < ((time_difference_threshold * 1000.0) as u128) {
         GatewayScoringType::Penalise
     } else {
         GatewayScoringType::PenaliseSrv3
     }
 }
 
+/// Whether the merchant's `latency-threshold` feature is on, letting latency affect its scores.
+async fn is_latency_threshold_enabled(merchant_id: String) -> bool {
+    is_feature_enabled(
+        C::LATENCY_THRESHOLD_SCORING_FEATURE_FLAG.to_string(),
+        merchant_id,
+        C::kvRedis(),
+    )
+    .await
+}
+
+/// The score lock for one kind of update to a merchant's payment on a gateway.
 pub fn update_gateway_score_lock(
     gateway_scoring_type: GatewayScoringType,
-    txn_uuid: String,
-    gateway: String,
+    merchant_id: &str,
+    txn_uuid: &str,
+    gateway: &str,
 ) -> String {
-    match gateway_scoring_type {
-        GatewayScoringType::Penalise => {
-            format!("gateway_scores_lock_PENALISE_{}_{}", txn_uuid, gateway)
-        }
-        GatewayScoringType::PenaliseSrv3 => {
-            format!("gateway_scores_lock_PENALISE_SRV3_{}_{}", txn_uuid, gateway)
-        }
-        GatewayScoringType::Reward => {
-            format!("gateway_scores_lock_REWARD_{}_{}", txn_uuid, gateway)
-        }
-    }
+    let kind = match gateway_scoring_type {
+        GatewayScoringType::Penalise => "PENALISE",
+        GatewayScoringType::PenaliseSrv3 => "PENALISE_SRV3",
+        GatewayScoringType::Reward => "REWARD",
+    };
+    format!("gateway_scores_lock_{kind}_{merchant_id}_{txn_uuid}_{gateway}")
 }
 
 /// Returns true when the GSM rule indicates the failure is user/issuer-originated
@@ -544,11 +554,7 @@ pub async fn check_and_update_gateway_score_(
         );
     }
 
-    let redis_key = format!(
-        "{}{}",
-        C::GATEWAY_SCORING_DATA,
-        api_payload.clone().payment_id
-    );
+    let redis_key = scoring_data_redis_key(&api_payload.merchant_id, &api_payload.payment_id).await;
     let app_state = get_tenant_app_state().await;
 
     // Attempt to fetch gateway scoring data from Redis
@@ -557,11 +563,19 @@ pub async fn check_and_update_gateway_score_(
         error_stack::Report<redis_interface::errors::RedisError>,
     > = app_state
         .redis_conn
-        .get_key(&redis_key, "GatewayScoringData")
-        .await;
+        .get_key::<StoredGatewayScoringData>(&redis_key, "GatewayScoringData")
+        .await
+        .map(GatewayScoringData::from);
 
     match m_gateway_scoring_data {
         Ok(gateway_scoring_data) => {
+            // The key is by payment id alone, so another merchant's payment is rejected untouched.
+            if gateway_scoring_data.merchantId != api_payload.merchant_id {
+                return Err(invalid_request_error(
+                    "payment_id",
+                    &"Payment does not belong to the requested merchant",
+                ));
+            }
             // Extract transaction details and card info from the API payload
             let txn_detail: TxnDetail = match Fbu::get_txn_detail_from_api_payload(
                 api_payload.clone(),
@@ -580,6 +594,8 @@ pub async fn check_and_update_gateway_score_(
             let log_message = "update_gateway_score";
             let enforce_failure = api_payload.enforce_dynamic_routing_failure.unwrap_or(false);
 
+            // The context stays until its TTL, so a retry on another connector is still scored;
+            // the score lock keeps a repeated update from counting twice.
             // Call the function to check and update the gateway score
             check_and_update_gateway_score(
                 txn_detail,
@@ -594,6 +610,7 @@ pub async fn check_and_update_gateway_score_(
                     crate::analytics::FlowType::UpdateGatewayScoreScoreSnapshot,
                 ),
                 None,
+                Some(gateway_scoring_data),
             )
             .await;
 
@@ -644,6 +661,21 @@ pub async fn check_and_update_gateway_score_(
     }
 }
 
+/// The key to read a payment's scoring context from: the merchant-keyed one, or the payment-id-only
+/// key older code stored it under, while that one has not expired.
+async fn scoring_data_redis_key(merchant_id: &str, payment_id: &str) -> String {
+    let key = DC::scoring_data_key(merchant_id, payment_id);
+    let legacy_key = format!("{}{}", C::GATEWAY_SCORING_DATA, payment_id);
+    let redis = &get_tenant_app_state().await.redis_conn;
+    if matches!(redis.key_exists(&key).await, Ok(false))
+        && matches!(redis.key_exists(&legacy_key).await, Ok(true))
+    {
+        legacy_key
+    } else {
+        key
+    }
+}
+
 pub async fn check_and_update_gateway_score(
     txn_detail: TxnDetail,
     txn_card_info: TxnCardInfo,
@@ -654,6 +686,7 @@ pub async fn check_and_update_gateway_score(
     analytics_route: crate::analytics::AnalyticsRoute,
     score_snapshot_flow: crate::analytics::AnalyticsFlowContext,
     redis_comp_config: Option<RedisCompressionConfigCombined>,
+    gateway_scoring_data: Option<GatewayScoringData>,
 ) -> () {
     // Get gateway scoring type
     let gateway_scoring_type =
@@ -661,16 +694,16 @@ pub async fn check_and_update_gateway_score(
 
     let gateway_in_string = txn_detail.gateway.clone().unwrap_or_default();
 
-    // Create update score lock key
+    let merchant_id = get_m_id(txn_detail.merchantId.clone());
     let update_score_lock_key = update_gateway_score_lock(
         gateway_scoring_type.clone(),
-        txn_detail.txnUuid.clone(), // This is Maybe type in haskell and here it is not Option
-        gateway_in_string,          // Convert Option to String
+        &merchant_id,
+        &txn_detail.txnUuid,
+        &gateway_in_string,
     );
-
-    let lock_key_ttl = findByNameFromRedis(UpdateGatewayScoreLockFlagTtl.get_key())
-        .await
-        .unwrap_or(300);
+    // The lock lasts as long as the context, so a repeat is dropped for as long as it could score.
+    let lock_key_ttl =
+        crate::decider::gatewaydecider::flow_new::scoring_data_ttl_secs(&merchant_id).await;
 
     let should_compute_gw_score = check_and_send_should_update_gateway_score(
         update_score_lock_key,
@@ -679,57 +712,38 @@ pub async fn check_and_update_gateway_score(
     )
     .await;
 
-    // Check if feature is enabled for merchant
-    let feature_enabled = is_feature_enabled(
-        UpdateScoreLockFeatureEnabledMerchant.get_key(),
-        get_m_id(txn_detail.merchantId.clone()),
-        "kv_redis".to_string(),
-    )
-    .await;
-
-    // Logging and score update logic
-    if feature_enabled {
-        if should_compute_gw_score {
-            logger::debug!(
-                action = "UPDATE_GATEWAY_SCORE_LOCK",
-                tag = "UPDATE_GATEWAY_SCORE_LOCK",
-                "Updating Gateway Score in {} flow with status as {:?} and scoring type as {:?}",
-                log_message,
-                txn_detail.status,
-                gateway_scoring_type
-            );
-            update_gateway_score(
-                gateway_scoring_type.clone(),
-                txn_detail.clone(),
-                txn_card_info.clone(),
-                gateway_reference_id.clone(),
-                txn_latency.clone(),
-                analytics_route,
-                score_snapshot_flow,
-                redis_comp_config.clone(),
-            )
-            .await;
-        }
-    } else {
+    // Every merchant is locked: only the first update of a kind, per payment and gateway, scores.
+    if should_compute_gw_score {
         logger::debug!(
-            action = "GW_SCORE_LOCK_FEATURE_NOT_ENABLED",
-            tag = "GW_SCORE_LOCK_FEATURE_NOT_ENABLED",
+            action = "UPDATE_GATEWAY_SCORE_LOCK",
+            tag = "UPDATE_GATEWAY_SCORE_LOCK",
             "Updating Gateway Score in {} flow with status as {:?} and scoring type as {:?}",
             log_message,
             txn_detail.status,
             gateway_scoring_type
         );
         update_gateway_score(
-            gateway_scoring_type.clone(),
+            gateway_scoring_type,
             txn_detail,
-            txn_card_info.clone(),
-            gateway_reference_id.clone(),
-            txn_latency.clone(),
+            txn_card_info,
+            gateway_reference_id,
+            txn_latency,
             analytics_route,
             score_snapshot_flow,
             redis_comp_config,
+            gateway_scoring_data,
         )
         .await;
+    } else {
+        logger::info!(
+            action = "UPDATE_GATEWAY_SCORE_DUPLICATE_SKIP",
+            tag = "UPDATE_GATEWAY_SCORE_DUPLICATE_SKIP",
+            "Skipping a repeated {:?} update in {} flow for payment_id={} gateway={}",
+            gateway_scoring_type,
+            log_message,
+            txn_detail.txnUuid,
+            gateway_in_string,
+        );
     }
 }
 
@@ -743,6 +757,7 @@ pub async fn update_gateway_score(
     analytics_route: crate::analytics::AnalyticsRoute,
     score_snapshot_flow: crate::analytics::AnalyticsFlowContext,
     redis_compression_config: Option<RedisCompressionConfigCombined>,
+    gateway_scoring_data: Option<GatewayScoringData>,
 ) -> () {
     let merchant_id = MID::merchant_id_to_text(txn_detail.clone().merchantId);
     let Some(mer_acc) = MA::load_merchant_by_merchant_id(merchant_id.clone()).await else {
@@ -804,36 +819,33 @@ pub async fn update_gateway_score(
         true
     };
 
-    let redis_key = format!("{}{}", C::GATEWAY_SCORING_DATA, txn_detail.clone().txnUuid);
-    let app_state = get_tenant_app_state().await;
+    // The context the caller read; the legacy `/update-score` passes none, so it is read here.
+    let gateway_scoring_data = match gateway_scoring_data {
+        Some(data) => Some(data),
+        None => {
+            let redis_key = scoring_data_redis_key(&merchant_id, &txn_detail.txnUuid).await;
+            get_tenant_app_state()
+                .await
+                .redis_conn
+                .get_key::<StoredGatewayScoringData>(&redis_key, "GatewayScoringData")
+                .await
+                .ok()
+                .map(GatewayScoringData::from)
+        }
+    };
 
     let redis_gateway_score_data_initial: Option<GatewayScoringData> =
         if should_update_srv3_gateway_score
             && should_isolate_srv3_producer
             && should_update_explore_txn
         {
-            let mb_gateway_scoring_data: Option<GatewayScoringData> = app_state
-                .redis_conn
-                .get_key(&redis_key, "GatewayScoringData")
-                .await
-                .ok();
-            mb_gateway_scoring_data
+            gateway_scoring_data.clone()
         } else {
             None
         };
 
     let mb_gateway_scoring_data: Option<GatewayScoringData> = if should_update_gateway_score {
-        match redis_gateway_score_data_initial {
-            None => {
-                let redis_data: Option<GatewayScoringData> = app_state
-                    .redis_conn
-                    .get_key(&redis_key, "GatewayScoringData")
-                    .await
-                    .ok();
-                redis_data
-            }
-            Some(_) => redis_gateway_score_data_initial,
-        }
+        redis_gateway_score_data_initial.or_else(|| gateway_scoring_data.clone())
     } else {
         None
     };
@@ -883,6 +895,7 @@ pub async fn update_gateway_score(
         }
     };
 
+    // Only the legacy `/update-score` checks the payment's age; the context's TTL bounds the rest.
     let is_update_within_window = is_update_within_latency_window(
         txn_detail.clone(),
         txn_card_info.clone(),
@@ -890,6 +903,7 @@ pub async fn update_gateway_score(
         mer_acc.clone(),
         txn_latency.clone(),
         m_metric_entry.clone(),
+        analytics_route != crate::analytics::AnalyticsRoute::UpdateGatewayScore,
     )
     .await;
 
@@ -944,12 +958,7 @@ pub async fn update_gateway_score(
             gateway_scoring_type,
             txn_detail.status
         );
-        let app_state = get_tenant_app_state().await;
-        let mb_gateway_scoring_data: Option<GatewayScoringData> = app_state
-            .redis_conn
-            .get_key(&redis_key, "GatewayScoringData")
-            .await
-            .ok();
+        let mb_gateway_scoring_data: Option<GatewayScoringData> = gateway_scoring_data.clone();
         GSSV3::flow::update_sr_v3_score(
             gateway_scoring_type.clone(),
             txn_detail.clone(),
@@ -1047,18 +1056,7 @@ pub async fn update_gateway_score(
     if should_update_gateway_score && is_update_within_window {
         let mer_acc_p_id: ETM::id::MerchantPId = mer_acc.id;
         let m_pf_mc_config = MerchantConfig::getMerchantConfigEntityLevelLookupConfig().await;
-        let mb_gateway_scoring_data = match mb_gateway_scoring_data {
-            None => {
-                let app_state = get_tenant_app_state().await;
-                let redis_data: Option<GatewayScoringData> = app_state
-                    .redis_conn
-                    .get_key(&redis_key, "GatewayScoringData")
-                    .await
-                    .ok();
-                redis_data
-            }
-            Some(_) => mb_gateway_scoring_data,
-        };
+        let mb_gateway_scoring_data = mb_gateway_scoring_data.or(gateway_scoring_data);
         logger::debug!(tag = "GatewayScoringData", "{:?}", mb_gateway_scoring_data);
         match mb_gateway_scoring_data {
             None => {
@@ -1199,6 +1197,7 @@ pub fn is_routing_approach_in_explore(maybe_text: Option<String>) -> bool {
 }
 
 // Original Haskell function: isUpdateWithinLatencyWindow
+/// Whether an update may change scores: connector latency (if on) and, optionally, payment age.
 pub async fn is_update_within_latency_window(
     txn_detail: TxnDetail,
     txn_card_info: TxnCardInfo,
@@ -1206,6 +1205,7 @@ pub async fn is_update_within_latency_window(
     mer_acc: MerchantAccount,
     txn_latency: Option<TransactionLatency>,
     m_metric_entry: Option<MetricEntry>,
+    check_update_age: bool,
 ) -> bool {
     match gateway_scoring_type {
         GatewayScoringType::Penalise => true,
@@ -1241,15 +1241,21 @@ pub async fn is_update_within_latency_window(
                     gw_wise_latency_threshold
                 );
 
-                // check if the transaction latency calculated by orchestration is within the configured threshold
-                let is_gw_latency_within_threshold = isGwLatencyWithinConfiguredThreshold(
-                    txn_latency.and_then(|m| m.gateway_latency),
-                    GatewaySuccessRateBasedRoutingInput::from_str(
-                        &mer_acc.gatewaySuccessRateBasedDeciderInput,
-                    )
-                    .ok()
-                    .and_then(|m| m.txnLatency.and_then(|l| l.gatewayLatency)),
-                );
+                // Connector latency counts against the merchant's limit only when the flag is on.
+                let is_gw_latency_within_threshold =
+                    !is_latency_threshold_enabled(get_m_id(txn_detail.merchantId.clone())).await
+                        || isGwLatencyWithinConfiguredThreshold(
+                            txn_latency.and_then(|m| m.gateway_latency),
+                            GatewaySuccessRateBasedRoutingInput::from_str(
+                                &mer_acc.gatewaySuccessRateBasedDeciderInput,
+                            )
+                            .ok()
+                            .and_then(|m| m.txnLatency.and_then(|l| l.gatewayLatency)),
+                        );
+                // Without the age check, the scoring context's TTL is the only time limit.
+                if !check_update_age {
+                    return is_gw_latency_within_threshold;
+                }
                 // Cutover::findByNameFromRedis(C.gatewayScoreLatencyCheckInMins)
                 //     .await
                 //     .unwrap_or(C.defaultGatewayScoreLatencyCheckInMins);

@@ -2198,14 +2198,14 @@ pub async fn get_gateway_scoring_data(
                     set_is_experiment_tag(decider_flow, experiment_tag);
                 }
             }
+            // No known card type stays None, not "": every reader treats the two alike.
             let card_type = txn_card_info
                 .card_type
                 .clone()
-                .map(|card| card_type_to_text(&card).to_uppercase())
-                .unwrap_or_default();
-            let bank_code = fetch_juspay_bank_code(&txn_card_info).unwrap_or("UNKNOWN".to_string());
-            default_gateway_scoring_data.cardType = Some(card_type.to_owned());
-            default_gateway_scoring_data.bankCode = Some(bank_code.to_owned());
+                .map(|card| card_type_to_text(&card).to_uppercase());
+            let bank_code = fetch_juspay_bank_code(&txn_card_info);
+            default_gateway_scoring_data.cardType = card_type;
+            default_gateway_scoring_data.bankCode = bank_code.to_owned();
             default_gateway_scoring_data.isBankLevelEnabledForSrRouting =
                 sr_evaluation_at_bank_level;
             default_gateway_scoring_data.isAuthLevelEnabledForSrRouting =
@@ -2543,7 +2543,7 @@ const SCOPE_COMPONENTS: usize = 2;
 /// UDF values, skipping any the payment lacks. The type and method are the instrument's codes
 /// (`CREDIT`, `CARD`). Scores live under this key, so its format is pinned by tests: changing it
 /// strands every merchant's learned scores.
-fn sr_key(components: &Vec<String>) -> String {
+pub(crate) fn sr_key(components: &Vec<String>) -> String {
     intercalate_without_empty_string("_", components)
 }
 
@@ -2553,7 +2553,7 @@ fn sr_cluster(components: &[String]) -> String {
 }
 
 /// The key's components in order. The first [`SCOPE_COMPONENTS`] of them are the scope.
-fn sr_key_components(
+pub(crate) fn sr_key_components(
     gateway_scoring_data: &GatewayScoringData,
     is_sr_v3_metric_enabled: bool,
     fields: &[String],

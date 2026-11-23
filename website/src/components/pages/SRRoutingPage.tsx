@@ -219,6 +219,8 @@ export function SRRoutingPage() {
   // editable. (See sr_auto_calibration.rs — it skips non-autopilot rows and never sets defaults.)
   const features = useMerchantFeatures(merchantId ?? undefined)
   const autopilotOn = features.isEnabled('autopilot')
+  // Latency thresholds stay editable but apply only while the latency-threshold flag is on.
+  const latencyOn = features.isEnabled('latency-threshold')
   // Volume Contracts is gated by the release roster (featureReleases.ts). A shared
   // ?tab=volume link opened outside the audience falls back to Autopilot like any unknown tab.
   const volumeContractsBeta = useFeatureReleased('volume-contracts')
@@ -509,10 +511,13 @@ export function SRRoutingPage() {
                       type="number"
                       {...register('defaultLatencyThreshold')}
                       placeholder="300"
-                      className={configInputClass}
+                      readOnly={!latencyOn}
+                      className={`${configInputClass} ${latencyOn ? '' : 'opacity-60'}`}
                     />
                     <p className={type.hint}>
-                      Timeouts inside this window count as outages, outside it as slow performance.
+                      {latencyOn
+                        ? 'A payment still pending after this long counts as a failure for its connector.'
+                        : 'Not applied: turn on Latency threshold under Feature Flags.'}
                     </p>
                   </label>
                 </CardBody>
@@ -543,7 +548,7 @@ export function SRRoutingPage() {
                             <th className="px-4 py-2">Auth Type</th>
                             <th className="px-4 py-2">Bucket Size</th>
                             <th className="px-4 py-2">Hedging %</th>
-                            <th className="px-4 py-2">Latency Threshold (s)</th>
+                            <th className="px-4 py-2" title={latencyOn ? undefined : 'Not applied: turn on Latency threshold under Feature Flags.'}>Latency Threshold (s){latencyOn ? '' : ' · off'}</th>
                             <th className="px-4 py-2" />
                           </tr>
                         </thead>
@@ -611,7 +616,7 @@ export function SRRoutingPage() {
                                 <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.authType`)} /><span className={lockedTextCls} title={lockedTitle}>{dimText(row?.authType)}</span></>) : (<input type="text" {...register(`subLevelInputConfig.${idx}.authType`)} placeholder="Any" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:border-brand-500" />)}</td>
                                 <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.bucketSize`)} /><span className={lockedTextCls} title={lockedTitle}>{numText(row?.bucketSize)}</span></>) : (<input type="number" {...register(`subLevelInputConfig.${idx}.bucketSize`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:border-brand-500" />)}</td>
                                 <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.hedgingPercent`)} /><span className={lockedTextCls} title={lockedTitle}>{numText(row?.hedgingPercent)}</span></>) : (<input type="number" step="0.1" {...register(`subLevelInputConfig.${idx}.hedgingPercent`)} placeholder="—" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:border-brand-500" />)}</td>
-                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.latencyThreshold`)} /><span className={lockedTextCls} title={lockedTitle}>{numText(row?.latencyThreshold)}</span></>) : (<input type="number" {...register(`subLevelInputConfig.${idx}.latencyThreshold`)} placeholder="—" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:border-brand-500" />)}</td>
+                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.latencyThreshold`)} /><span className={lockedTextCls} title={lockedTitle}>{numText(row?.latencyThreshold)}</span></>) : (<input type="number" {...register(`subLevelInputConfig.${idx}.latencyThreshold`)} placeholder="—" readOnly={!latencyOn} className={`${latencyOn ? '' : 'opacity-60 '}border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:border-brand-500`} />)}</td>
                                 <td className="px-4 py-2">{autopilotOwned ? (<span className="text-slate-500 dark:text-slate-400" title="Managed by Autopilot — turn Autopilot off to remove"><Trash2 size={14} /></span>) : (<button type="button" onClick={() => removeSubLevelOverride(idx)} className="text-slate-500 hover:text-red-600"><Trash2 size={14} /></button>)}</td>
                               </tr>
                             )
@@ -915,6 +920,13 @@ const SR_FEATURES: { feature: KnownFeature; title: string; description: string; 
       'Keeps all connector ratings fresh by regularly sending a small share of payments to every connector — not just the top performer. This ensures the system can quickly detect when a backup connector becomes better than the current top, and reroute accordingly. The Hedging % setting controls how large this share is.',
   },
   {
+    // Gates the SR config latency threshold and the elimination connector latency threshold.
+    feature: 'latency-threshold',
+    title: 'Latency threshold',
+    description:
+      'Let latency affect connector scores: a payment still pending after the SR config\'s Latency threshold (s) counts as a failure, and an update whose connector call took longer than the Connector latency threshold (ms) is not scored. Off, latency never affects scores and both thresholds are ignored.',
+  },
+  {
     feature: 'sr-scores-from-rule-routing',
     title: 'Learn from rule-routed payments',
     description:
@@ -1145,6 +1157,8 @@ function SRFeatureFlags({ merchantId }: { merchantId: string | null }) {
 function EliminationConfig({ merchantId }: { merchantId: string | null }) {
   // Read-only sessions still see everything; the controls that would change it are inert.
   const canEditRouting = useCanEditRouting()
+  // The connector latency threshold applies only while the latency-threshold flag is on.
+  const latencyOn = useMerchantFeatures(merchantId ?? undefined).isEnabled('latency-threshold')
   const [threshold, setThreshold] = useState<string>('')
   const [gatewayLatency, setGatewayLatency] = useState<string>('')
   const [saving, setSaving] = useState(false)
@@ -1277,10 +1291,13 @@ function EliminationConfig({ merchantId }: { merchantId: string | null }) {
               value={gatewayLatency}
               onChange={e => setGatewayLatency(e.target.value)}
               placeholder="5000"
-              className={configInputClass}
+              readOnly={!latencyOn}
+              className={`${configInputClass} ${latencyOn ? '' : 'opacity-60'}`}
             />
             <p className={type.hint}>
-              Connectors slower than this are eliminated too. Leave blank to disable.
+              {latencyOn
+                ? 'An update whose connector call took longer than this does not change scores. Leave blank to disable.'
+                : 'Not applied: turn on Latency threshold under Feature Flags.'}
             </p>
           </label>
         </CardBody>

@@ -126,6 +126,35 @@ Each pod keeps merchant accounts and cost models in memory. When one pod changes
 
 Publishing is best effort. If Redis is unavailable, the write still succeeds and the other pods fall back to the existing TTLs (`service_config_ttl` for accounts and service configs, the 5-minute cost-model refresh). Deployments that share a Redis but must stay separate (for example, two environments) should each set their own `invalidation_channel`. The metric `cache_invalidations_total{kind, outcome}` counts published, failed and applied invalidations.
 
+### Gateway scoring context TTL
+
+Each routed payment stores a scoring context in Redis (`gateway_scoring_data_<merchant_id>_<payment_id>`, so merchants that reuse a payment id never share one; a context stored under the earlier `gateway_scoring_data_<payment_id>` key is still read, for its own merchant only, until it expires). Its TTL is how late that payment's `/update-gateway-score` can arrive and still update scores; there is no other age limit on that endpoint. Two deployment settings bound it:
+
+```toml
+[scoring_data]
+default_ttl_secs = 1800   # a merchant without its own TTL
+max_ttl_secs = 259200     # no merchant's contexts stay longer (3 days)
+```
+
+Override them per deployment with `DECISION_ENGINE__SCORING_DATA__DEFAULT_TTL_SECS` and `DECISION_ENGINE__SCORING_DATA__MAX_TTL_SECS`. Startup fails unless `0 < default_ttl_secs <= max_ttl_secs`.
+
+A merchant can have its own TTL, stored in the service config `SCORING_DATA_TTL_SECS_<merchant_id>`, which replaces the default. A TTL above `max_ttl_secs` is kept but applies as `max_ttl_secs`, so lowering the max takes effect for every merchant without editing their TTLs. Only the admin secret can set a merchant's TTL, because it sizes the Redis Decision Engine shares with other services:
+
+```bash
+# Set 48 hours (at least 1 second; above max_ttl_secs applies as the max)
+curl -X PUT http://localhost:8080/admin/merchant-account/<merchant_id>/scoring-data-ttl \
+  -H 'x-admin-secret: <admin secret>' -H 'Content-Type: application/json' \
+  -d '{"ttl_secs": 172800}'
+
+# Read it ("merchant_ttl_secs": null when the merchant has none)
+curl http://localhost:8080/admin/merchant-account/<merchant_id>/scoring-data-ttl -H 'x-admin-secret: <admin secret>'
+
+# Back to default_ttl_secs (also succeeds when the merchant has none)
+curl -X DELETE http://localhost:8080/admin/merchant-account/<merchant_id>/scoring-data-ttl -H 'x-admin-secret: <admin secret>'
+```
+
+Each call returns `{"merchant_id", "ttl_secs", "merchant_ttl_secs", "default_ttl_secs", "max_ttl_secs"}`, where `ttl_secs` is the TTL new contexts get. A merchant that was never created gets `404`, and a `ttl_secs` below 1 gets `400`. A change reaches every pod at once and applies to payments routed after it; contexts already in Redis keep the TTL they were written with. A context stays until its TTL, whatever the outcome, so a retry of the same `payment_id` on another connector is still scored. A repeated update is scored once: the first update of each kind (reward, SR failure, pending) for a merchant's payment on a connector takes a lock that lasts as long as the context, and later ones are skipped. Each context takes about 480 bytes of Redis memory, so 48 hours of a merchant's traffic needs about 83 MB per transaction per second, plus about 150 bytes for each lock (one or two per payment).
+
 ### Database
 
 MySQL and PostgreSQL use separate config sections.

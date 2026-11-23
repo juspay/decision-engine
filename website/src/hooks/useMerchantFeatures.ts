@@ -12,6 +12,7 @@ export type KnownFeature =
   | 'volume-contracts'
   | 'sr-routing'
   | 'sr-scores-from-rule-routing'
+  | 'latency-threshold'
 
 export function useMerchantFeatures(merchantId?: string) {
   const path = merchantId ? `/merchant-account/${merchantId}/features` : null
