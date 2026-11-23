@@ -1409,7 +1409,7 @@ function ExperimentDetailPanel({
                 <Notice key={v.metrics.arm} tone="danger">
                   Among completed payments, {variants.length === 1 ? 'variant' : name} auth rate dropped {guardrailDropPp(v.metrics)?.toFixed(2)}pp below control — beyond the {abData?.guardrail_threshold_pp}pp guardrail.{' '}
                   {!isActive
-                    ? 'This experiment is inactive. Payments use your active routing setup.'
+                    ? 'This experiment is inactive. Payments use your active routing setup. Activating it again resumes it with the same data, so the guardrail will stop it again; to test a fixed setup, Duplicate it.'
                     : stopped
                       ? `${name} is stopped: its payments now use your live routing setup, while the other variants keep running.`
                       : others > 0

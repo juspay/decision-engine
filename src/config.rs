@@ -81,8 +81,8 @@ pub struct GlobalConfig {
 #[derive(Clone, serde::Deserialize, Debug)]
 #[serde(default)]
 pub struct AbTestSettings {
-    /// How long an experiment's guardrail keys (its observation period, routed payments and
-    /// outcome counts) are kept after their last write; each write resets it.
+    /// How long an experiment's guardrail keys (its routed payments and outcome counts) are kept
+    /// after their last write; each write resets it.
     pub guardrail_keys_ttl_secs: i64,
 }
 

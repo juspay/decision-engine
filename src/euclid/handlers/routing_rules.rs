@@ -1868,12 +1868,11 @@ pub async fn activate_routing_rule(
 
         // Only the merchant's own algorithm can be activated; another merchant's id reads as
         // not-found.
-        let mut algorithm =
-            algorithm_store::find(&state.db, &merchant, &payload.routing_algorithm_id)
-                .await
-                .change_context(EuclidErrors::RoutingAlgorithmNotFound(
-                    payload.routing_algorithm_id.clone(),
-                ))?;
+        let algorithm = algorithm_store::find(&state.db, &merchant, &payload.routing_algorithm_id)
+            .await
+            .change_context(EuclidErrors::RoutingAlgorithmNotFound(
+                payload.routing_algorithm_id.clone(),
+            ))?;
 
         // An experiment runs in its own slot beside the active rule for its transaction type, so
         // the rule stays active, and listed as active, while the experiment runs and after it
@@ -1888,39 +1887,8 @@ pub async fn activate_routing_rule(
         let occupant = algorithm_store::find_slot(&state.db, &merchant, &slot)
             .await
             .change_context(EuclidErrors::StorageError)?;
-        let already_active = occupant
-            .as_ref()
-            .is_some_and(|mapping| mapping.routing_algorithm_id == algorithm.id);
-        // A deliberate activation starts a new guardrail observation period. Started before
-        // anything changes, so an activation that can't start one fails and changes nothing,
-        // instead of running on the previous period's counts.
-        if is_experiment && !already_active {
-            crate::decider::gatewaydecider::ab_test::guardrail::start_period(
-                merchant.as_str(),
-                &algorithm.id,
-            )
-            .await
-            .change_context(EuclidErrors::StorageError)
-            .attach_printable("could not start the experiment's guardrail observation period")?;
-        }
-        if is_experiment && !already_active {
-            if let Some(resumed) = with_stopped_variants_resumed(&algorithm.algorithm_data) {
-                let modified_at = utc_now();
-                algorithm_store::update_definition(
-                    &state.db,
-                    &merchant,
-                    &algorithm.id,
-                    &algorithm.name,
-                    &algorithm.description,
-                    resumed.clone(),
-                    modified_at,
-                )
-                .await
-                .change_context(EuclidErrors::StorageError)?;
-                algorithm.algorithm_data = resumed;
-                algorithm.modified_at = modified_at;
-            }
-        }
+        // Activating an experiment again resumes it: its guardrail counts, and its stopped
+        // variants, carry on as they were.
         let changed = match occupant {
             // Already active with the same algorithm: only the cache TTL is refreshed.
             Some(mapping) if mapping.routing_algorithm_id == algorithm.id => false,
@@ -2003,25 +1971,6 @@ fn utc_now() -> time::PrimitiveDateTime {
     time::PrimitiveDateTime::new(now.date(), now.time())
 }
 
-/// The experiment definition with every guardrail-stopped variant running again, or `None` when no
-/// variant is stopped. A deliberate activation starts a new observation period, so a variant the
-/// guardrail stopped in an earlier run gets its traffic back.
-fn with_stopped_variants_resumed(algorithm_data: &str) -> Option<String> {
-    let StaticRoutingAlgorithm::AbTest(mut data) =
-        serde_json::from_str::<StaticRoutingAlgorithm>(algorithm_data).ok()?
-    else {
-        return None;
-    };
-    let variants = data.variants.as_mut()?;
-    if !variants.iter().any(|variant| variant.stopped) {
-        return None;
-    }
-    for variant in variants.iter_mut() {
-        variant.stopped = false;
-    }
-    serde_json::to_string(&StaticRoutingAlgorithm::AbTest(data)).ok()
-}
-
 /// Stop the variant that breached its guardrail. Its payments are routed by the live setup from then
 /// on, untracked, while the experiment's other variants keep running. When it was the last running variant the
 /// whole experiment stops instead; the regular routing rule remains active either way.
@@ -2029,17 +1978,9 @@ pub(crate) async fn stop_breached_payment_experiment(
     merchant_id: &str,
     experiment_id: &str,
     variant_id: &str,
-    run: u64,
 ) -> Result<(), String> {
-    use crate::decider::gatewaydecider::ab_test::{arms, guardrail};
+    use crate::decider::gatewaydecider::ab_test::arms;
 
-    // A stop judged in an earlier observation period must not stop the run that replaced it.
-    let current = guardrail::current_run(merchant_id, experiment_id)
-        .await
-        .map_err(|e| format!("{e:?}"))?;
-    if current != run {
-        return Ok(());
-    }
     let state = get_tenant_app_state().await;
     // Internal work, since the guardrail only names experiments that routed this merchant's payments.
     let merchant = crate::auth::AuthorizedMerchant::internal(merchant_id);
@@ -2171,23 +2112,13 @@ async fn stop_whole_experiment(
     Ok(())
 }
 
-/// End the experiment that routed its sample target of payments in observation period `run`, so
-/// the active rule routes every payment again. The conditional delete cannot remove a replacement
-/// experiment activated in the meantime.
+/// End the experiment that reached its sample target, or its routing cap, so the active rule
+/// routes every payment again. The conditional delete cannot remove a replacement experiment
+/// activated in the meantime.
 pub(crate) async fn complete_payment_experiment(
     merchant_id: &str,
     experiment_id: &str,
-    run: u64,
 ) -> Result<(), String> {
-    use crate::decider::gatewaydecider::ab_test::guardrail;
-
-    // A completion counted in an earlier observation period must not end the one that replaced it.
-    let current = guardrail::current_run(merchant_id, experiment_id)
-        .await
-        .map_err(|e| format!("{e:?}"))?;
-    if current != run {
-        return Ok(());
-    }
     let state = get_tenant_app_state().await;
     // Internal work, since the guardrail only names experiments that routed this merchant's payments.
     let merchant = crate::auth::AuthorizedMerchant::internal(merchant_id);
@@ -2646,7 +2577,7 @@ mod routing_evaluate_analytics_flows_tests {
 
 #[cfg(test)]
 mod experiment_edit_tests {
-    use super::{changes_experiment_routing, with_stopped_variants_resumed};
+    use super::changes_experiment_routing;
     use crate::euclid::types::StaticRoutingAlgorithm;
 
     fn experiment(split: u8, sample: u32, guardrail: f64, rule: &str) -> StaticRoutingAlgorithm {
@@ -2717,27 +2648,5 @@ mod experiment_edit_tests {
             &existing,
             &multi_variant(["B", "C"], [false, true], "routing_d"),
         ));
-    }
-
-    #[test]
-    fn activation_resumes_stopped_variants() {
-        let stopped =
-            serde_json::to_string(&multi_variant(["B", "C"], [true, false], "routing_c")).unwrap();
-        let resumed = with_stopped_variants_resumed(&stopped).expect("a variant was stopped");
-        let resumed: StaticRoutingAlgorithm = serde_json::from_str(&resumed).unwrap();
-        let StaticRoutingAlgorithm::AbTest(data) = resumed else {
-            panic!("not an experiment");
-        };
-        assert!(data
-            .variants
-            .unwrap()
-            .iter()
-            .all(|variant| !variant.stopped));
-
-        let running =
-            serde_json::to_string(&multi_variant(["B", "C"], [false, false], "routing_c")).unwrap();
-        assert!(with_stopped_variants_resumed(&running).is_none());
-        let single = serde_json::to_string(&experiment(10, 1000, 3.0, "routing_a")).unwrap();
-        assert!(with_stopped_variants_resumed(&single).is_none());
     }
 }

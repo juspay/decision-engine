@@ -96,9 +96,12 @@ test('payment feedback stops a breached experiment and leaves the active rule in
     await feedback(api, merchant.id, variants[0], 'adyen', 'AUTHORIZED')
     expect(await experimentActive(api, merchant.id, experimentId)).toBe(false)
 
+    // Activating it again resumes the same data: the breach still stands, so the next outcome stops
+    // it again. A fresh start takes a duplicate.
     await api.activateRoutingAlgorithm(merchant.id, experimentId)
     expect(await experimentActive(api, merchant.id, experimentId)).toBe(true)
-    expect(await route(api, merchant.id, paymentForVariant())).toBe('adyen')
+    await resolve(api, merchant.id, [paymentInBuckets(20, 100)], 'checkout', 'AUTHORIZED')
+    await expect.poll(() => experimentActive(api, merchant.id, experimentId), { timeout: 10_000, intervals: [200] }).toBe(false)
   } finally {
     await api.raw('POST', '/routing/deactivate', {
       failOnStatusCode: false,
@@ -128,7 +131,7 @@ test('an experiment needs a sample target of at least one payment', async ({ api
   expect((await create(1)).status).toBe(200)
 })
 
-test('every guardrail key expires, the observation period included', async ({ api, merchant }) => {
+test('every guardrail key expires', async ({ api, merchant }) => {
   const experimentId = await createExperiment(api, merchant.id)
   try {
     await expect.poll(() => route(api, merchant.id, paymentForVariant()), { timeout: 15_000, intervals: [500] }).toBe('adyen')
@@ -137,9 +140,9 @@ test('every guardrail key expires, the observation period included', async ({ ap
     await feedback(api, merchant.id, payment, 'adyen', 'AUTHORIZED')
     await expect.poll(() => abGuardrailCounts(merchant.id, experimentId)).toMatchObject({ variant_txns: 1 })
 
-    // The period key, the routed set and both outcome counts: each set to the configured 30 days.
+    // The routed set and both outcome counts, each set to the configured 30 days.
     const keys = await redisKeys(`ab_guardrail_{${merchant.id}_${experimentId}}_*`)
-    expect(keys.some((key) => key.endsWith('_run'))).toBe(true)
+    expect(keys.map((key) => key.split('}_')[1]).sort()).toEqual(['variant_routed', 'variant_succ', 'variant_txns'])
     for (const key of keys) {
       const ttl = await redisTtl(key)
       expect(ttl, key).toBeGreaterThan(2_592_000 - 60)
@@ -205,12 +208,15 @@ test('with several variants, feedback stops only the breached variant', async ({
     expect(await route(api, merchant.id, paymentInBuckets(0, 20))).toBe('stripe')
     expect(await route(api, merchant.id, paymentInBuckets(20, 40))).toBe('razorpay')
 
-    // A deliberate reactivation starts a new observation period with every variant running.
+    // Activating it again resumes it: the stopped variant stays stopped, the other keeps running.
     await api.raw('POST', '/routing/deactivate', {
       body: { created_by: merchant.id, routing_algorithm_id: experimentId },
     })
     await api.activateRoutingAlgorithm(merchant.id, experimentId)
-    expect(await route(api, merchant.id, paymentInBuckets(0, 20))).toBe('adyen')
+    await expect.poll(stoppedVariants, { timeout: 10_000, intervals: [200] })
+      .toEqual([['failing', true], ['healthy', false]])
+    expect(await route(api, merchant.id, paymentInBuckets(0, 20))).toBe('stripe')
+    expect(await route(api, merchant.id, paymentInBuckets(20, 40))).toBe('razorpay')
   } finally {
     await api.raw('POST', '/routing/deactivate', {
       failOnStatusCode: false,

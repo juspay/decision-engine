@@ -214,7 +214,7 @@ test.describe('A/B guardrail across instances (API)', () => {
     }
   })
 
-  test('a reactivation on one instance starts a fresh period the other instance judges in', async ({ api, merchant }) => {
+  test('a reactivation on one instance resumes the counts the other instance kept', async ({ api, merchant }) => {
     const m = merchant.id
     const experimentId = await createExperiment(api, m, 1000)
     try {
@@ -223,13 +223,36 @@ test.describe('A/B guardrail across instances (API)', () => {
       await resolve(api, POD_A, POD_A, m, many(40, variantPayment), 'adyen', 'FAILURE')
       await expect.poll(() => experimentActive(api, m, experimentId), { timeout: 15_000, intervals: [300] }).toBe(false)
 
-      // The breach was judged on the earlier period's outcomes, which must not stop the new one.
+      // Activated again on pod B, it resumes: the breach still stands, so the next outcome, on
+      // pod A, stops it again.
       await activate(api, POD_B, m, experimentId)
-      const nextControl = controlPayment()
-      await route(api, POD_A, m, nextControl)
-      await feedback(api, POD_A, m, nextControl, 'checkout', 'AUTHORIZED')
-      await expect.poll(() => abGuardrailCounts(m, experimentId)).toMatchObject({ control_txns: 1, control_succ: 1 })
+      await resolve(api, POD_A, POD_A, m, many(1, controlPayment), 'checkout', 'AUTHORIZED')
+      await expect.poll(() => experimentActive(api, m, experimentId), { timeout: 15_000, intervals: [300] }).toBe(false)
+    } finally {
+      await deactivate(api, POD_A, m, experimentId)
+    }
+  })
+
+  test('outcomes before and after a pause add up to the sample target', async ({ api, merchant }) => {
+    const m = merchant.id
+    // Target 10 outcomes; every payment succeeds, so only the target can end it.
+    const experimentId = await createExperiment(api, m, 10)
+    try {
+      await activate(api, POD_A, m, experimentId)
+      await resolve(api, POD_A, POD_B, m, many(4, controlPayment), 'checkout', 'AUTHORIZED')
+      await resolve(api, POD_A, POD_B, m, many(2, variantPayment), 'adyen', 'AUTHORIZED')
+      await expect.poll(async () => {
+        const counts = await abGuardrailCounts(m, experimentId)
+        return (counts.control_txns ?? 0) + (counts.variant_txns ?? 0)
+      }).toBe(6)
+
+      // Stopped and activated again: the 6 outcomes carry over, and 4 more reach the target.
+      await deactivate(api, POD_B, m, experimentId)
+      await activate(api, POD_B, m, experimentId)
+      await resolve(api, POD_B, POD_A, m, many(3, controlPayment), 'checkout', 'AUTHORIZED')
       expect(await experimentActive(api, m, experimentId)).toBe(true)
+      await resolve(api, POD_B, POD_A, m, many(1, variantPayment), 'adyen', 'AUTHORIZED')
+      await expect.poll(() => experimentActive(api, m, experimentId), { timeout: 15_000, intervals: [300] }).toBe(false)
     } finally {
       await deactivate(api, POD_A, m, experimentId)
     }

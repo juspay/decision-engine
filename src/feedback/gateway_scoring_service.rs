@@ -473,14 +473,13 @@ async fn apply_guardrail_action(
         GuardrailAction::StopVariant {
             experiment_id,
             variant_id,
-            run,
         } => (
             experiment_id,
-            stop_breached_payment_experiment(merchant_id, experiment_id, variant_id, *run).await,
+            stop_breached_payment_experiment(merchant_id, experiment_id, variant_id).await,
         ),
-        GuardrailAction::Complete { experiment_id, run } => (
+        GuardrailAction::Complete { experiment_id } => (
             experiment_id,
-            complete_payment_experiment(merchant_id, experiment_id, *run).await,
+            complete_payment_experiment(merchant_id, experiment_id).await,
         ),
     };
     if let Err(error) = result {

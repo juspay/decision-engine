@@ -157,7 +157,7 @@ Each call returns `{"merchant_id", "ttl_secs", "merchant_ttl_secs", "default_ttl
 
 ### A/B guardrail key retention
 
-An A/B experiment's guardrail keeps its state in Redis under `ab_guardrail_{<merchant_id>_<experiment_id>}_…`: the observation period's start, each arm's routed payments, and its outcome counts. Each key expires `guardrail_keys_ttl_secs` after its last write, and every routed payment and outcome resets it, so a running experiment keeps its keys and they go once it stops getting traffic:
+An A/B experiment's guardrail keeps its state in Redis under `ab_guardrail_{<merchant_id>_<experiment_id>}_…`: each arm's routed payments and its outcome counts. Each key expires `guardrail_keys_ttl_secs` after its last write, and every routed payment and outcome resets it, so a running experiment keeps its keys and they go once it stops getting traffic:
 
 ```toml
 [ab_test]
