@@ -599,7 +599,11 @@ fn merchant_routes() -> axum::Router<Arc<GlobalAppState>> {
             metered!(post, routes::hybrid_routing::hybrid_routing_evaluate)
                 .layer(middleware::from_fn(custom_middleware::routing_deadline)),
         )
-        .route("/decide", metered!(post, routes::decide::decide))
+        .route(
+            "/decide",
+            metered!(post, routes::decide::decide)
+                .layer(middleware::from_fn(custom_middleware::routing_deadline)),
+        )
         .route(
             "/update-gateway-score",
             metered!(post, routes::update_gateway_score::update_gateway_score)

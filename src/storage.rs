@@ -19,16 +19,6 @@ use tokio::time;
 use diesel::MysqlConnection;
 #[cfg(feature = "postgres")]
 use diesel::PgConnection;
-#[cfg(feature = "mysql")]
-use diesel_async::{
-    pooled_connection::{self, deadpool::Pool},
-    AsyncMysqlConnection,
-};
-#[cfg(feature = "postgres")]
-use diesel_async::{
-    pooled_connection::{self, deadpool::Pool},
-    AsyncPgConnection,
-};
 
 use error_stack::ResultExt;
 use masking::PeekInterface;
@@ -76,17 +66,6 @@ impl Storage {
         database: &PgDatabase,
         schema: &str,
     ) -> error_stack::Result<Self, error::StorageError> {
-        let database_url = pg_database_url(database, schema);
-
-        let config =
-            pooled_connection::AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
-        let pool = Pool::builder(config);
-
-        let _pool = match database.pg_pool_size {
-            Some(value) => pool.max_size(value),
-            None => pool,
-        };
-
         let pool = diesel_make_pg_pool(database, schema, false).await?;
         Ok(Self { pg_pool: pool })
     }
@@ -108,27 +87,6 @@ impl Storage {
         database: &Database,
         schema: &str,
     ) -> error_stack::Result<Self, error::StorageError> {
-        let database_url = format!(
-            "mysql://{}:{}@{}:{}/{}?application_name={}&options=-c%20search_path%3D{}",
-            database.username,
-            database.password.peek(),
-            database.host,
-            database.port,
-            database.dbname,
-            schema,
-            schema
-        );
-
-        let config = pooled_connection::AsyncDieselConnectionManager::<AsyncMysqlConnection>::new(
-            database_url,
-        );
-        let pool = Pool::builder(config);
-
-        let _pool = match database.pool_size {
-            Some(value) => pool.max_size(value),
-            None => pool,
-        };
-
         let pool = diesel_make_mysql_pool(database, schema, false).await?;
         Ok(Self { pg_pool: pool })
     }
@@ -166,6 +124,20 @@ impl Storage {
             } // timeout occurred
         }
     }
+}
+
+/// Connections per pool when the database config sets no size.
+const DEFAULT_POOL_MAX_SIZE: u32 = 50;
+
+/// How long a caller waits for a free pooled connection before the query fails.
+const POOL_CONNECTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The configured pool size, or [`DEFAULT_POOL_MAX_SIZE`]. bb8 refuses a size of zero.
+fn pool_max_size(configured: Option<usize>) -> u32 {
+    configured
+        .and_then(|size| u32::try_from(size).ok())
+        .filter(|size| *size > 0)
+        .unwrap_or(DEFAULT_POOL_MAX_SIZE)
 }
 
 pub(crate) trait TestInterface {
@@ -234,8 +206,8 @@ pub async fn diesel_make_pg_pool(
     let database_url = pg_database_url(database, schema);
     let manager = async_bb8_diesel::ConnectionManager::<PgConnection>::new(database_url);
     let pool = bb8::Pool::builder()
-        .max_size(50)
-        .connection_timeout(std::time::Duration::from_secs(60));
+        .max_size(pool_max_size(database.pg_pool_size))
+        .connection_timeout(POOL_CONNECTION_TIMEOUT);
 
     pool.build(manager)
         .await
@@ -261,11 +233,27 @@ pub async fn diesel_make_mysql_pool(
     );
     let manager = async_bb8_diesel::ConnectionManager::<MysqlConnection>::new(database_url);
     let pool = bb8::Pool::builder()
-        .max_size(50)
-        .connection_timeout(std::time::Duration::from_secs(60));
+        .max_size(pool_max_size(database.pool_size))
+        .connection_timeout(POOL_CONNECTION_TIMEOUT);
 
     pool.build(manager)
         .await
         .change_context(error::StorageError::InitializationError)
         .attach_printable("Failed to create MySQL connection pool")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{pool_max_size, DEFAULT_POOL_MAX_SIZE};
+
+    #[test]
+    fn the_configured_pool_size_is_used() {
+        assert_eq!(pool_max_size(Some(12)), 12);
+    }
+
+    #[test]
+    fn an_unset_or_zero_pool_size_falls_back_to_the_default() {
+        assert_eq!(pool_max_size(None), DEFAULT_POOL_MAX_SIZE);
+        assert_eq!(pool_max_size(Some(0)), DEFAULT_POOL_MAX_SIZE);
+    }
 }

@@ -28,7 +28,7 @@ routing_request_timeout_ms = 2000  # optional, default 2000
 
 `host` is the bind address. Use `0.0.0.0` for Docker/deployed, `127.0.0.1` for local-only.
 
-`routing_request_timeout_ms` caps how long a routing hot-path request may run before it is answered with `504`: `/decide-gateway`, `/decision_gateway`, `/routing/evaluate`, `/routing/evaluate/batch`, `/routing/hybrid` and `/update-gateway-score`. Other routes, such as report uploads and analytics, have no deadline. A score update the handler has already queued still completes after the timeout.
+`routing_request_timeout_ms` caps how long a routing hot-path request may run before it is answered with `504`: `/decide`, `/decide-gateway`, `/decision_gateway`, `/routing/evaluate`, `/routing/evaluate/batch`, `/routing/hybrid` and `/update-gateway-score`. Other routes, such as report uploads and analytics, have no deadline. A score update the handler has already queued still completes after the timeout.
 
 A handler that panics on any route is answered with `500` and logged, rather than having its connection dropped.
 
@@ -179,6 +179,7 @@ password = "db_pass"
 host = "localhost"
 port = 3306
 dbname = "decision_engine_db"
+pool_size = 50  # optional, default 50
 ```
 
 **PostgreSQL:**
@@ -190,7 +191,10 @@ pg_password = "db_pass"
 pg_host = "localhost"
 pg_port = 5432
 pg_dbname = "decision_engine_db"
+pg_pool_size = 50  # optional, default 50
 ```
+
+`pool_size` / `pg_pool_size` caps the connections each pod opens to the database. A query that finds every pooled connection busy waits up to 10 seconds for one, then fails.
 
 For Docker Compose runs both are pre-wired via service names in `config/docker-configuration.toml`.
 
