@@ -200,3 +200,61 @@ impl EmailClient for AwsSesEmailClient {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aws_sdk_sesv2::config::{retry::RetryConfig, Credentials, Region};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// A send through the proxied client must reach the proxy: the pool opens its
+    /// connection on the runtime the request runs on.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn proxied_client_sends_through_proxy() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind fake proxy");
+        let proxy_url = format!("http://{}", listener.local_addr().expect("proxy addr"));
+
+        let proxy = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept proxy connection");
+            let mut buf = vec![0u8; 4096];
+            let read = socket.read(&mut buf).await.expect("read proxy request");
+            let _ = socket
+                .write_all(b"HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\n\r\n")
+                .await;
+            String::from_utf8_lossy(&buf[..read]).into_owned()
+        });
+
+        let http_client = build_proxied_http_client(&proxy_url).expect("build proxied client");
+        let config = aws_sdk_sesv2::Config::builder()
+            .behavior_version(BehaviorVersion::latest())
+            .region(Region::new("us-east-1"))
+            .credentials_provider(Credentials::new("test", "test", None, None, "test"))
+            .retry_config(RetryConfig::disabled())
+            .http_client(http_client)
+            .build();
+        let client = aws_sdk_sesv2::Client::from_conf(config);
+
+        let result = client
+            .get_email_identity()
+            .email_identity("sender@example.com")
+            .send()
+            .await;
+        let err = result.expect_err("fake proxy refuses the tunnel");
+        let detail = describe_sdk_error(&err);
+        assert!(
+            !detail.contains("requires an active Tokio runtime"),
+            "pool had no runtime: {detail}"
+        );
+
+        let request = tokio::time::timeout(std::time::Duration::from_secs(5), proxy)
+            .await
+            .expect("proxy saw a request")
+            .expect("proxy task");
+        assert!(
+            request.starts_with("CONNECT email.us-east-1.amazonaws.com:443"),
+            "unexpected proxy request: {request}"
+        );
+    }
+}
