@@ -93,20 +93,25 @@ impl Default for AbTestSettings {
     }
 }
 
-/// `[scoring_data]`: the default and max TTL of the scoring context `/decide` stores in Redis.
+/// `[scoring_data]`: the default and max TTL of the scoring context `/decide` stores in Redis, and
+/// how long it is kept once the payment succeeds.
 #[derive(Clone, serde::Deserialize, Debug)]
 #[serde(default)]
 pub struct ScoringDataConfig {
     pub default_ttl_secs: i64,
     pub max_ttl_secs: i64,
+    /// Seconds a payment's context and its success lock stay once `/update-gateway-score`
+    /// reports it succeeded; 0 keeps them for their full TTL.
+    pub after_success_ttl_secs: i64,
 }
 
-// 30 minutes by default, 3 days at most, when the config leaves them out.
+// 30 minutes by default, 3 days at most, 15 minutes after a success, when the config leaves them out.
 impl Default for ScoringDataConfig {
     fn default() -> Self {
         Self {
             default_ttl_secs: 1_800,
             max_ttl_secs: 259_200,
+            after_success_ttl_secs: 900,
         }
     }
 }
@@ -118,6 +123,11 @@ impl ScoringDataConfig {
             .filter(|ttl| *ttl > 0)
             .unwrap_or(self.default_ttl_secs)
             .min(self.max_ttl_secs)
+    }
+
+    /// How long a succeeded payment's context is kept, or None to keep it for its full TTL.
+    pub fn after_success_ttl_secs(&self) -> Option<i64> {
+        (self.after_success_ttl_secs > 0).then_some(self.after_success_ttl_secs)
     }
 }
 
@@ -1375,6 +1385,13 @@ impl GlobalConfig {
                 )
             ));
         }
+        if self.scoring_data.after_success_ttl_secs < 0 {
+            return Err(error_stack::report!(
+                error::ConfigurationError::InvalidConfigurationValueError(
+                    "scoring_data.after_success_ttl_secs".to_string(),
+                )
+            ));
+        }
         if self.ab_test.guardrail_keys_ttl_secs <= 0 {
             return Err(error_stack::report!(
                 error::ConfigurationError::InvalidConfigurationValueError(
@@ -1494,12 +1511,34 @@ mod tests {
         }
     }
 
+    // 0 keeps a succeeded payment's context for its full TTL; anything else replaces it.
+    #[test]
+    fn after_success_ttl_zero_keeps_the_full_ttl() {
+        let mut config = ScoringDataConfig::default();
+        assert_eq!(config.after_success_ttl_secs(), Some(900));
+        config.after_success_ttl_secs = 0;
+        assert_eq!(config.after_success_ttl_secs(), None);
+    }
+
+    // A negative after-success TTL is refused; 0 and any positive value start.
+    #[test]
+    fn after_success_ttl_must_not_be_negative() {
+        let mut config = GlobalConfig::new().expect("failed to parse the development config");
+        config.scoring_data.after_success_ttl_secs = -1;
+        assert!(config.validate().is_err());
+        for ttl in [0, 60, 900] {
+            config.scoring_data.after_success_ttl_secs = ttl;
+            config.validate().expect("0 or a positive TTL is allowed");
+        }
+    }
+
     // A merchant's TTL is used as is, or cut to the max when above it.
     #[test]
     fn scoring_data_ttl_is_the_merchants_capped_at_the_max() {
         let config = ScoringDataConfig {
             default_ttl_secs: 1_800,
             max_ttl_secs: 259_200,
+            ..ScoringDataConfig::default()
         };
         assert_eq!(config.ttl_secs(Some(172_800)), 172_800);
         assert_eq!(config.ttl_secs(Some(10_000_000)), 259_200);
@@ -1511,6 +1550,7 @@ mod tests {
         let config = ScoringDataConfig {
             default_ttl_secs: 3_600,
             max_ttl_secs: 7_200,
+            ..ScoringDataConfig::default()
         };
         assert_eq!(config.ttl_secs(None), 3_600);
         assert_eq!(config.ttl_secs(Some(0)), 3_600);

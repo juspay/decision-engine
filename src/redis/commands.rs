@@ -679,6 +679,25 @@ impl RedisConnectionWrapper {
             .change_context(errors::RedisError::IncrementHashFieldFailed)
     }
 
+    /// Lowers the key's TTL to `ttl` seconds, leaving a shorter TTL as it is (`EXPIRE … LT`,
+    /// Redis 7.0+). Returns whether the TTL changed; a missing key is left alone and returns false.
+    pub async fn shorten_expiry(&self, key: &str, ttl: i64) -> Result<bool, errors::RedisError> {
+        use fred::interfaces::ClientLike;
+        use fred::types::{ClusterHash, CustomCommand};
+
+        let changed: i64 = self
+            .conn
+            .pool
+            .next()
+            .custom(
+                CustomCommand::new_static("EXPIRE", ClusterHash::FirstKey, false),
+                vec![key.to_string(), ttl.to_string(), "LT".to_string()],
+            )
+            .await
+            .change_context(errors::RedisError::SetExpiryFailed)?;
+        Ok(changed == 1)
+    }
+
     #[cfg(not(feature = "redis_compression"))]
     pub async fn setXWithOption(
         &self,

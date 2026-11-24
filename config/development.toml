@@ -110,6 +110,10 @@ tenant_id = "public"
 # go past the max, which bounds the Redis shared with other services.
 default_ttl_secs = 1800   # 30 minutes
 max_ttl_secs = 259200     # 3 days
+# Once /update-gateway-score reports a payment succeeded, its context and success lock are cut to
+# this, in seconds: no retry follows a success, and an outcome arriving out of order still scores
+# within it. 0 keeps them for their full TTL. The legacy /update-score keeps the full TTL.
+after_success_ttl_secs = 900   # 15 minutes
 
 [ab_test]
 # How long an A/B experiment's guardrail keys in Redis (its routed payments and outcome counts)

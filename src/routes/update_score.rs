@@ -250,6 +250,7 @@ pub async fn update_score(
                 ),
                 redis_comp_config_final,
                 None,
+                None,
             )
             .await;
 
