@@ -93,7 +93,7 @@ curl --location "$BASE_URL/webhooks/settlement/merchant_demo/adyen" \
   --data @adyen-settlement-notification.json
 ```
 
-The handler ACKs immediately and enqueues the report for background processing — download, parse, and re-fit all happen asynchronously in the ingest worker, so the connector always gets a fast response. A bad signature returns `401`. An unrecognized connector or a malformed payload returns `400`.
+The handler ACKs immediately and enqueues the report for background processing — download, parse, and re-fit all happen asynchronously in the ingest worker, so the connector always gets a fast response. A bad signature returns `401`. An unrecognized connector or a malformed payload returns `400`. A body over 64 KiB returns `413`.
 
 For Adyen, only `REPORT_AVAILABLE` notifications are accepted, and the report URL they carry must be an `https` URL on an `adyen.com` host. Any other event, or a URL elsewhere, returns `400`. Subscribe this endpoint to report notifications only. The download does not follow redirects.
 

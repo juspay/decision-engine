@@ -21,6 +21,11 @@ use super::connectors::stripe::StripeReportSource;
 use super::mapping::ColumnMapping;
 use super::types::{ConnectorCreds, IngestError, ReadyReport, ReportNotification, SettledFeeRow};
 
+/// Largest settlement webhook body accepted. Report-ready notifications are a few KB at most; the
+/// route rejects anything larger before buffering it, and each connector checks again before
+/// parsing.
+pub const MAX_NOTIFICATION_BYTES: usize = 64 * 1024;
+
 /// Everything connector-specific lives behind this trait. All methods are pure functions of
 /// their inputs except `download_report` (network), so impls are straightforward to unit-test.
 #[async_trait]

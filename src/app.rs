@@ -692,7 +692,12 @@ fn public_routes() -> axum::Router<Arc<GlobalAppState>> {
     axum::Router::new()
         .route(
             "/webhooks/settlement/:merchant_id/:connector",
-            metered!(post, routes::settlement_webhook::settlement_webhook),
+            // Connector notifications are small; refuse a larger body before it is buffered.
+            metered!(post, routes::settlement_webhook::settlement_webhook).layer(
+                axum::extract::DefaultBodyLimit::max(
+                    crate::cost_ingestion::source::MAX_NOTIFICATION_BYTES,
+                ),
+            ),
         )
         .route("/auth/signup", metered!(post, routes::user_auth::signup))
         .route("/auth/login", metered!(post, routes::user_auth::login))
