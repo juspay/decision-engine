@@ -109,6 +109,28 @@ export async function redisListLength(key: string): Promise<number> {
 }
 
 /**
+ * Refuses SET on keys starting with `prefix` (every other key still takes it) until `allowRedisSet`,
+ * to exercise how the engine handles a write Redis rejects without failing unrelated requests.
+ *
+ * ACL key patterns only allow, so SET is withdrawn and granted back by a selector whose globs match
+ * every key that does not start with `prefix`: one that diverges at each position, or is shorter.
+ */
+export async function refuseRedisSet(prefix: string): Promise<void> {
+  if (/[*?[\]\\^-]/.test(prefix)) throw new Error(`prefix ${prefix} has glob characters`)
+  const patterns: string[] = []
+  for (let i = 0; i < prefix.length; i++) {
+    patterns.push(`~${prefix.slice(0, i)}[^${prefix[i]}]*`)
+    if (i > 0) patterns.push(`~${prefix.slice(0, i)}`)
+  }
+  await command(['ACL', 'SETUSER', 'default', '-set', `(+set ${patterns.join(' ')})`])
+}
+
+/** Undoes `refuseRedisSet`; harmless when nothing was refused. */
+export async function allowRedisSet(): Promise<void> {
+  await command(['ACL', 'SETUSER', 'default', '+set', 'clearselectors'])
+}
+
+/**
  * Distinct payments the A/B guardrail counted per arm in an experiment's current observation
  * period, keyed `<arm>_txns` and `<arm>_succ`. Exact for a handful of payments; from a few dozen,
  * HyperLogLog can read one or two low, so assert those with a margin.

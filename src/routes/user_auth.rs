@@ -1151,12 +1151,21 @@ pub async fn logout(
         .as_secs();
     let remaining_ttl = claims.exp.saturating_sub(now) as i64;
 
+    // The token is refused only once its jti is on the denylist, so logout succeeds only if that
+    // write does; otherwise the client is told, and the session stays usable until it retries.
     if remaining_ttl > 0 {
         let deny_key = format!("{}{}", JWT_DENYLIST_PREFIX, claims.jti);
-        let _ = app_state
+        app_state
             .redis_conn
             .set_key_with_ttl(&deny_key, "1", remaining_ttl)
-            .await;
+            .await
+            .inspect_err(|error| {
+                crate::logger::error!(
+                    ?error,
+                    "Logout failed: could not add the session to the denylist"
+                );
+            })
+            .change_context(UserAuthError::StorageError)?;
     }
 
     Ok(Json(
