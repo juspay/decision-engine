@@ -232,6 +232,14 @@ async fn settled_volume(
     })
 }
 
+/// Budget for one invoice query, matching the other cost-pipeline reads.
+const QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+fn client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| crate::cost_ingestion::ch_http::client(QUERY_TIMEOUT))
+}
+
 /// POST a `{name:Type}`-parameterized query to ClickHouse (same transport as `fit`/`serving`).
 pub(super) async fn exec(
     cfg: &ClickHouseAnalyticsConfig,
@@ -242,7 +250,7 @@ pub(super) async fn exec(
         .iter()
         .map(|(k, v)| (format!("param_{k}"), v.clone()))
         .collect();
-    let mut req = crate::cost_ingestion::ch_http::post(&reqwest::Client::new(), &cfg.url)
+    let mut req = crate::cost_ingestion::ch_http::post(client(), &cfg.url)
         .query(&q)
         .body(query.to_string());
     if !cfg.user.is_empty() {
