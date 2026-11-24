@@ -429,6 +429,16 @@ test.describe('Routing configuration across instances (API)', () => {
   })
 })
 
+test.describe('Sessions across instances (API)', () => {
+  test('a session logged out on one instance is refused on the other', async ({ api, merchant }) => {
+    const me = (pod: string) => api.raw('GET', `${pod}/auth/me`, { failOnStatusCode: false }).then((r) => r.status)
+    expect(await me(POD_B)).toBe(200)
+
+    expect((await api.raw('POST', `${POD_A}/auth/logout`, { failOnStatusCode: false })).status).toBe(200)
+    expect(await me(POD_B)).toBe(401)
+  })
+})
+
 test.describe('Success-rate scoring across instances (API)', () => {
   test('a payment decided on one instance is scored from feedback on the other', async ({ api, merchant }) => {
     const m = merchant.id
