@@ -1,6 +1,8 @@
 import { test, expect, factory } from '../../fixtures/test'
 import type { ApiClient } from '../../fixtures/api-client'
-import { abGuardrailCounts, redisKeys, redisListLength, redisTtl } from '../../helpers/redis'
+import {
+  abGuardrailCounts, cutPubSub, redisKeys, redisListLength, redisSubscribers, redisTtl, restorePubSub,
+} from '../../helpers/redis'
 import { decide, decideBody, decidedConnector } from '../../helpers/decide'
 
 /**
@@ -13,8 +15,16 @@ import { decide, decideBody, decidedConnector } from '../../helpers/decide'
 const POD_A = process.env.API_BASE_URL || 'http://localhost:8080'
 const POD_B = process.env.API_BASE_URL_B || 'http://localhost:8099'
 const PODS = [POD_A, POD_B]
+/** `[cache_config] invalidation_channel` both instances run with. */
+const INVALIDATION_CHANNEL = 'decision_engine_invalidate'
+
+// One test cuts every instance off pub/sub for a moment, which would hold up the invalidations
+// other tests here wait for, so this file's tests run one at a time.
+test.describe.configure({ mode: 'default' })
 
 test.beforeAll(async ({ request }) => {
+  // Undoes a cut left behind by an aborted run, which would keep every instance off the channel.
+  await restorePubSub()
   const reachable = await request.get(`${POD_B}/health`).then((r) => r.ok(), () => false)
   // CI always starts pod B; a local run against a single server skips instead of failing.
   if (!process.env.CI) test.skip(!reachable, `second instance not running at ${POD_B}`)
@@ -499,6 +509,35 @@ test.describe('Cached configuration across instances (API)', () => {
     } finally {
       await deactivate(api, POD_A, m, experimentId)
     }
+  })
+
+  test('an instance that missed invalidations while reconnecting drops what it cached', async ({ api, merchant }) => {
+    const m = merchant.id
+    await api.createSuccessRateConfig(m)
+    const rule = await api.createRoutingAlgorithm(factory.singleRoutingPayload(m, { gateway: 'stripe' }))
+    await api.activateRoutingAlgorithm(m, rule.body.rule_id)
+    const srOnB = () => decide(api, factory.paymentId('multi_pod_reconnect'), ['stripe'], POD_B)
+      .then((body) => body.success_rate?.status ?? 'skipped')
+
+    // Pod B caches sr-routing as off.
+    expect(await srOnB()).toBe('skipped')
+
+    await cutPubSub()
+    try {
+      expect(await redisSubscribers(INVALIDATION_CHANNEL)).toBe(0)
+      const on = await api.raw('POST', `${POD_A}/merchant-account/${m}/features/sr-routing`, { body: { enabled: true } })
+      expect(on.status).toBe(200)
+      // The toggle's invalidation reached no one, so pod B still acts on its cached value.
+      expect(await srOnB()).toBe('skipped')
+    } finally {
+      await restorePubSub()
+    }
+
+    // Back on the channel, pod B cannot know what it missed and drops its cache. The toggle's
+    // invalidation is never sent again, so only that flush explains it applying inside the TTL.
+    await expect.poll(srOnB, { timeout: 15_000, intervals: [250] }).toBe('applied')
+    // Both instances are subscribed again, so the tests after this one get their invalidations.
+    await expect.poll(() => redisSubscribers(INVALIDATION_CHANNEL)).toBeGreaterThanOrEqual(2)
   })
 
   test("a merchant's scoring-context TTL set on one instance applies on the other", async ({ api, merchant }) => {

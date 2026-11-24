@@ -124,3 +124,23 @@ export async function abGuardrailCounts(merchantId: string, experimentId: string
   return counts
 }
 
+/** How many connections are subscribed to `channel`. */
+export async function redisSubscribers(channel: string): Promise<number> {
+  const [, count] = (await command(['PUBSUB', 'NUMSUB', channel])) as [string, number]
+  return count
+}
+
+/**
+ * Closes every pub/sub connection and refuses SUBSCRIBE until `restorePubSub`, so whatever is
+ * published meanwhile reaches no instance: the gap a Redis failover leaves. Instances stay
+ * connected for everything else.
+ */
+export async function cutPubSub(): Promise<void> {
+  await command(['ACL', 'SETUSER', 'default', '-subscribe'])
+  await command(['CLIENT', 'KILL', 'TYPE', 'pubsub'])
+}
+
+/** Allows SUBSCRIBE again after `cutPubSub`; harmless when it was never cut. */
+export async function restorePubSub(): Promise<void> {
+  await command(['ACL', 'SETUSER', 'default', '+subscribe'])
+}
