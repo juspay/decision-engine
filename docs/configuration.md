@@ -124,7 +124,11 @@ Each pod keeps merchant accounts and cost models in memory. When one pod changes
 | Cost models refitted (report upload or delete, ingest worker, invoice, connector-fee override) | Rebuild that merchant's models from ClickHouse |
 | Service config written (for example `/rule/*` SR config, `/config-sr-dimension`, merchant feature toggles, `/gateway-score/reset`, SR auto-calibration) | Drop their in-memory copy, so the next read takes the new value from Redis |
 
-Publishing is best effort. If Redis is unavailable, the write still succeeds and the other pods fall back to the existing TTLs (`service_config_ttl` for accounts and service configs, the 5-minute cost-model refresh). Deployments that share a Redis but must stay separate (for example, two environments) should each set their own `invalidation_channel`. The metric `cache_invalidations_total{kind, outcome}` counts published, failed and applied invalidations.
+Publishing is best effort. If Redis is unavailable, the write still succeeds and the other pods fall back to the existing TTLs (`service_config_ttl` for accounts and service configs, the 5-minute cost-model refresh). Deployments that share a Redis but must stay separate (for example, two environments) should each set their own `invalidation_channel`.
+
+Pub/sub keeps no backlog, so a pod misses whatever is published while its subscriber connection is down. After every reconnect, a pod subscribes again (retrying until Redis accepts) and then drops all cached service configs and merchant accounts and rebuilds its cost models, so it never acts on a change it was not told about. It does the same when a burst of messages overflows its buffer.
+
+The metric `cache_invalidations_total{kind, outcome}` counts published, failed and applied invalidations, and flushes (`kind="all"`, `outcome` `flushed_after_reconnect` or `flushed_after_lag`).
 
 ### Gateway scoring context TTL
 
