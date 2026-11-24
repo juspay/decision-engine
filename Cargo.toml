@@ -80,6 +80,7 @@ josekit = "0.8.7"
 
 error-stack = "0.4.1"
 fred = { version = "~9.0.3", features = [
+    "i-hyperloglog",
     "metrics",
     "partial-tracing",
     "subscriber-client",

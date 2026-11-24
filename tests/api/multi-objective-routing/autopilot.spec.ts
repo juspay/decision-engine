@@ -1,4 +1,5 @@
-import { test, expect } from '../../fixtures/test'
+import { test, expect, factory } from '../../fixtures/test'
+import decideContract from '../../fixtures/contracts/decide-request.json'
 
 /**
  * Autopilot reliability at the API boundary.
@@ -57,5 +58,60 @@ test.describe('Autopilot control surface (API)', () => {
   test('gateway-score reset requires a merchant_id', async ({ api }) => {
     const r = await api.raw('POST', '/gateway-score/reset', { body: {}, failOnStatusCode: false })
     expect(r.status).toBeGreaterThanOrEqual(400)
+  })
+})
+
+/**
+ * The calibration job itself, end to end: it runs every `[sr_auto_calibration] interval_secs` (60s in
+ * the dev config) over the last `lookback_secs` of SR decisions, and writes an autopilot-sourced
+ * sub-level entry for each segment with `min_volume` decisions across at least two gateways.
+ */
+test.describe('Autopilot calibration (API)', () => {
+  /** Enrols a merchant in SR routing and autopilot, with no manual sub-level entries. */
+  async function enrol(api: any, merchantId: string) {
+    await api.createSuccessRateConfig(merchantId, { subLevelInputConfig: [] })
+    expect((await api.setMerchantFeature(merchantId, 'sr-routing', true)).status).toBe(200)
+    expect((await api.setMerchantFeature(merchantId, 'autopilot', true)).status).toBe(200)
+  }
+
+  /** Waits for the job's next cycles to write an autopilot entry, and returns it. */
+  async function calibratedEntry(api: any, merchantId: string) {
+    const entries = async () => {
+      const cfg = await api.getSuccessRateConfig(merchantId)
+      return (cfg.body?.config?.data?.subLevelInputConfig ?? []).filter((e: any) => e.source === 'autopilot')
+    }
+    await expect.poll(async () => (await entries()).length, { timeout: 180_000, intervals: [5_000] }).toBeGreaterThan(0)
+    const [entry] = await entries()
+    return entry
+  }
+
+  test('calibrates bucket size and hedging from SR traffic on /decide', async ({ api, merchant }) => {
+    test.setTimeout(240_000)
+    const m = merchant.id
+    await enrol(api, m)
+    // With no active rule, SR decides among the three eligible connectors; fresh scores tie, so
+    // decisions spread across them.
+    for (let i = 0; i < 40; i++) {
+      const body = {
+        ...structuredClone(decideContract),
+        payment_id: factory.paymentId('autopilot'),
+        routing_config: {
+          ...structuredClone(decideContract.routing_config),
+          eligible_connectors: ['stripe', 'adyen', 'checkout'].map((name) => {
+            const { gateway_name, gateway_id } = factory.gatewayConnector(name)
+            return { connector: gateway_name, merchant_connector_id: gateway_id! }
+          }),
+        },
+      }
+      const r = await api.raw('POST', '/decide', { body })
+      expect(r.status, JSON.stringify(r.body).slice(0, 300)).toBe(200)
+      expect(r.body.success_rate?.status).toBe('applied')
+    }
+    const entry = await calibratedEntry(api, m)
+    // The contract payment is a credit card.
+    expect(entry.paymentMethod?.toUpperCase()).toBe('CARD')
+    expect(entry.paymentMethodType?.toUpperCase()).toBe('CREDIT')
+    expect(entry.bucketSize).toBeGreaterThan(0)
+    expect(entry.hedgingPercent).toBeGreaterThan(0)
   })
 })

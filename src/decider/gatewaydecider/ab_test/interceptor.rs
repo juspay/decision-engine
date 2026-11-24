@@ -22,8 +22,9 @@ pub enum AbTestIntercept {
 
 /// Emit a routing-time `RoutingEvaluateAbTest` event: the decision the experiment results
 /// attribute to the arm (arm, endpoint, layers, gateway, cost and amount). The payment's outcome
-/// is joined to it later from the score updates reported for the same payment.
-pub fn emit_routing_event(
+/// is joined to it later from the score updates reported for the same payment. The payment is
+/// recorded for the guardrail before this returns, so its feedback finds it however soon it comes.
+pub async fn emit_routing_event(
     payment_id: &str,
     merchant_id: &str,
     assignment: &ExperimentAssignment,
@@ -32,12 +33,13 @@ pub fn emit_routing_event(
     cost: &CostOutcome,
     amount: Option<f64>,
 ) {
-    guardrail::record_decision(
+    guardrail::record_routed(
         merchant_id,
         &assignment.experiment_id,
+        &assignment.side,
         payment_id,
-        assignment.endpoint,
-    );
+    )
+    .await;
     let variant_arm = assignment.side.as_str();
     let arm_label = match (&projection.rule_algorithm_id, &projection.sr) {
         (Some(rule), Some(_)) => format!("{rule}+sr_routing"),
@@ -81,17 +83,8 @@ pub async fn hybrid_arm_has_sr_layer(merchant_id: &str, payment_id: &str) -> Opt
     if !config::is_enabled(merchant_id).await {
         return None;
     }
-    let AbTestConfig {
-        experiment_id,
-        data,
-    } = config::load_active_ab_test(merchant_id).await?;
-    let plan = guardrail::plan(
-        merchant_id,
-        &experiment_id,
-        &data,
-        ExperimentEndpoint::HybridRouting,
-        payment_id,
-    );
+    let AbTestConfig { data, .. } = config::load_active_ab_test(merchant_id).await?;
+    let plan = arms::plan(&data, ExperimentEndpoint::HybridRouting, payment_id);
     // A payment the experiment doesn't cover is routed by the live setup.
     plan.in_experiment.then_some(plan.projection.sr.is_some())
 }
@@ -117,13 +110,7 @@ pub async fn intercept(
     };
 
     let payment_id = dreq.payment_id();
-    let plan = guardrail::plan(
-        &dreq.merchant_id,
-        &experiment_id,
-        &data,
-        endpoint,
-        payment_id,
-    );
+    let plan = arms::plan(&data, endpoint, payment_id);
 
     logger::debug!(
         "ab_test intercept: payment_id={} merchant={} experiment={} endpoint={} arm={} in_experiment={}",

@@ -128,8 +128,5 @@ test.describe('A/B experiment transactions', () => {
     ).toBeVisible()
     await expect(authedPage.getByText(`Page 1 of 3 · ${ROUTED} routed`)).toBeVisible()
     await expect(authedPage.getByText(`${RESOLVED} / 1,000`)).toBeVisible()
-    await expect(
-      authedPage.getByText(`of the 1,000 needed for a verdict · ${AWAITING} more awaiting an outcome`),
-    ).toBeVisible()
   })
 })

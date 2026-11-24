@@ -70,6 +70,27 @@ pub struct GlobalConfig {
     /// Scoring-context TTL settings; defaults apply when the section is missing.
     #[serde(default)]
     pub scoring_data: ScoringDataConfig,
+    /// A/B experiment settings; defaults apply when the section is missing.
+    #[serde(default)]
+    pub ab_test: AbTestSettings,
+}
+
+/// `[ab_test]`: Redis retention of the A/B guardrail's state.
+#[derive(Clone, serde::Deserialize, Debug)]
+#[serde(default)]
+pub struct AbTestSettings {
+    /// How long an experiment's guardrail keys (its routed payments and outcome counts) are kept
+    /// after their last write; each write resets it.
+    pub guardrail_keys_ttl_secs: i64,
+}
+
+// 30 days when the config leaves it out.
+impl Default for AbTestSettings {
+    fn default() -> Self {
+        Self {
+            guardrail_keys_ttl_secs: 30 * 24 * 60 * 60,
+        }
+    }
 }
 
 /// `[scoring_data]`: the default and max TTL of the scoring context `/decide` stores in Redis.
@@ -444,6 +465,8 @@ pub struct TenantConfig {
     pub card_info_service: CardInfoServiceConfig,
     /// Scoring-context TTL settings, copied from the global config.
     pub scoring_data: ScoringDataConfig,
+    /// A/B experiment settings, copied from the global config.
+    pub ab_test: AbTestSettings,
 }
 
 /// Deployment-level mechanics for volume commitment routing; everything per-merchant arrives
@@ -725,6 +748,7 @@ impl TenantConfig {
             volume_commitment: global_config.volume_commitment.clone(),
             card_info_service: global_config.card_info_service.clone(),
             scoring_data: global_config.scoring_data.clone(),
+            ab_test: global_config.ab_test.clone(),
         }
     }
 }
@@ -1351,6 +1375,13 @@ impl GlobalConfig {
                 )
             ));
         }
+        if self.ab_test.guardrail_keys_ttl_secs <= 0 {
+            return Err(error_stack::report!(
+                error::ConfigurationError::InvalidConfigurationValueError(
+                    "ab_test.guardrail_keys_ttl_secs".to_string(),
+                )
+            ));
+        }
         Ok(())
     }
 }
@@ -1484,6 +1515,13 @@ mod tests {
         assert_eq!(config.ttl_secs(None), 3_600);
         assert_eq!(config.ttl_secs(Some(0)), 3_600);
         assert_eq!(config.ttl_secs(Some(-5)), 3_600);
+    }
+
+    #[test]
+    fn ab_test_guardrail_keys_default_to_thirty_days() {
+        assert_eq!(AbTestSettings::default().guardrail_keys_ttl_secs, 2_592_000);
+        let parsed: AbTestSettings = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(parsed.guardrail_keys_ttl_secs, 2_592_000);
     }
 }
 

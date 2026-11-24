@@ -92,3 +92,35 @@ export async function redisKeys(pattern: string): Promise<string[]> {
   } while (cursor !== '0')
   return keys.sort()
 }
+
+/** `PFCOUNT` of the HyperLogLog at `key`: 0 when it doesn't exist. */
+export async function redisPfcount(key: string): Promise<number> {
+  return (await command(['PFCOUNT', key])) as number
+}
+
+/** Seconds until the key at `key` expires: -1 without an expiry, -2 when it doesn't exist. */
+export async function redisTtl(key: string): Promise<number> {
+  return (await command(['TTL', key])) as number
+}
+
+/** Length of the list at `key`: 0 when it doesn't exist. */
+export async function redisListLength(key: string): Promise<number> {
+  return (await command(['LLEN', key])) as number
+}
+
+/**
+ * Distinct payments the A/B guardrail counted per arm in an experiment's current observation
+ * period, keyed `<arm>_txns` and `<arm>_succ`. Exact for a handful of payments; from a few dozen,
+ * HyperLogLog can read one or two low, so assert those with a margin.
+ */
+export async function abGuardrailCounts(merchantId: string, experimentId: string): Promise<Record<string, number>> {
+  const counts: Record<string, number> = {}
+  for (const key of await redisKeys(`ab_guardrail_{${merchantId}_${experimentId}}_*`)) {
+    // The routed-payment sets aren't counts.
+    if (key.endsWith('_routed')) continue
+    // ab_guardrail_{m_e}_<arm>_<txns|succ>
+    counts[key.split('}_')[1]] = await redisPfcount(key)
+  }
+  return counts
+}
+

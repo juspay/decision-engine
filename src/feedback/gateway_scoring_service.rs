@@ -458,6 +458,37 @@ pub fn invalid_request_error(detail: &str, e: &impl std::fmt::Display) -> T::Err
 /// never routed by the decider, and no context was stored for it), so no score was updated.
 pub const SCORE_UPDATE_SKIPPED: &str = "Skipped";
 
+/// Stops the variant or completes the experiment the guardrail named. A failure is logged and
+/// retried on the experiment's next payment outcome.
+async fn apply_guardrail_action(
+    merchant_id: &str,
+    action: crate::decider::gatewaydecider::ab_test::guardrail::GuardrailAction,
+) {
+    use crate::decider::gatewaydecider::ab_test::guardrail::GuardrailAction;
+    use crate::euclid::handlers::routing_rules::{
+        complete_payment_experiment, stop_breached_payment_experiment,
+    };
+
+    let (experiment_id, result) = match &action {
+        GuardrailAction::StopVariant {
+            experiment_id,
+            variant_id,
+        } => (
+            experiment_id,
+            stop_breached_payment_experiment(merchant_id, experiment_id, variant_id).await,
+        ),
+        GuardrailAction::Complete { experiment_id } => (
+            experiment_id,
+            complete_payment_experiment(merchant_id, experiment_id).await,
+        ),
+    };
+    if let Err(error) = result {
+        logger::error!(merchant_id = %merchant_id, experiment_id = %experiment_id,
+            action = ?action, error = %error,
+            "Failed to apply the A/B guardrail's action; the next payment outcome retries it");
+    }
+}
+
 pub async fn check_and_update_gateway_score_(
     api_payload: FT::UpdateScorePayload,
 ) -> Result<String, T::ErrorResponse> {
@@ -465,26 +496,14 @@ pub async fn check_and_update_gateway_score_(
     // not be gated on the GSM scoring filter or on GatewayScoringData still being cached.
     let is_success = is_transaction_success(api_payload.status.clone());
     if is_success || is_transaction_failure(api_payload.status.clone()) {
-        let experiments_to_stop =
-            crate::decider::gatewaydecider::ab_test::guardrail::record_outcome(
-                &api_payload.merchant_id,
-                &api_payload.payment_id,
-                is_success,
-            );
-        for breached in experiments_to_stop {
-            if let Err(error) =
-                crate::euclid::handlers::routing_rules::stop_breached_payment_experiment(
-                    &api_payload.merchant_id,
-                    &breached.experiment_id,
-                    &breached.variant_id,
-                    breached.run,
-                )
-                .await
-            {
-                logger::error!(merchant_id = %api_payload.merchant_id,
-                    experiment_id = %breached.experiment_id, variant_id = %breached.variant_id,
-                    error = %error,
-                    "Failed to stop breached A/B variant; later payment feedback will retry");
+        if let Some(tracked) = crate::decider::gatewaydecider::ab_test::guardrail::track(
+            &api_payload.merchant_id,
+            &api_payload.payment_id,
+        )
+        .await
+        {
+            for action in tracked.record_outcome(is_success).await {
+                apply_guardrail_action(&api_payload.merchant_id, action).await;
             }
         }
     }

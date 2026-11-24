@@ -1133,17 +1133,30 @@ function ExperimentDetailPanel({
   }
   const breachedVariants = results?.variants.filter(v => v.verdict === 'guardrail_breached') ?? []
   const minSample = abData?.min_sample_size ?? 1000
+  // Variants past the guardrail's drop that the engine hasn't judged a breach: the drop isn't yet
+  // clear of normal variation on the payments behind it.
+  const earlyGuardrailSignals = (results?.variants ?? []).flatMap(v => {
+    const drop = guardrailDropPp(v.metrics)
+    return v.verdict !== 'guardrail_breached' && drop !== null && abData && drop > abData.guardrail_threshold_pp
+      ? [{ variant: v, drop, variantResolved: resolvedTxns(v.metrics) }]
+      : []
+  })
   // Each comparison needs its own sample (control plus that variant), so progress follows the
   // comparison furthest from its target.
   const sampleTxns = results && results.variants.length > 0
     ? Math.min(...results.variants.map(v => controlResolved + resolvedTxns(v.metrics)))
     : 0
   const collectedShare = minSample > 0 ? Math.min(1, sampleTxns / minSample) : 0
-  const progress = Math.round(collectedShare * 100)
-  // A handful of transactions against a 5,000 target rounds to 0% and paints an empty track, which
-  // reads as "nothing collected". Keep a sliver of bar, and say "<1%" rather than "0%".
-  const progressLabel = progress === 0 && sampleTxns > 0 ? '<1%' : `${progress}%`
+  // A handful of transactions against a 5,000 target would paint an empty track, which reads as
+  // "nothing collected", so the bar keeps a sliver.
   const progressWidth = sampleTxns > 0 ? Math.max(collectedShare * 100, 1.5) : 0
+  // The experiment completes once each comparison (control plus a variant) has the target's outcomes,
+  // or, should outcomes stop arriving, once one has routed twice the target.
+  const routedTxns = results && results.variants.length > 0
+    ? Math.max(...results.variants.map(v => results.control.transaction_count + v.metrics.transaction_count))
+    : 0
+  const completedWithVerdict = !isActive && sampleTxns >= minSample
+  const completedWithoutOutcomes = !isActive && sampleTxns < minSample && routedTxns >= 2 * minSample
   const controlPct = abData ? controlSplitPct(abData) : 90
 
   const status: 'active' | 'paused' | 'inactive' = isActive ? (realPaymentsOn ? 'active' : 'paused') : 'inactive'
@@ -1151,11 +1164,11 @@ function ExperimentDetailPanel({
   // The banner speaks for the experiment as a whole: still collecting while any comparison is.
   const overallVerdict = results?.variants.some(v => v.verdict === 'collecting_data') ? 'collecting_data' : 'not_significant'
 
-  // Rough "time to target" projection for the progress card. There's no served ingestion rate, so
-  // the rate is derived from txns-so-far over the time the experiment has been live — `modified_at`
-  // is a sound proxy for activation, since edits are blocked once an experiment is running. Only
-  // shown while actively collecting with real progress; any missing/degenerate input returns null
-  // rather than a misleading estimate.
+  // Rough "time to completion" projection for the progress card. There's no served outcome rate, so
+  // the rate is derived from outcomes so far over the time the experiment has been live —
+  // `modified_at` is a sound proxy for activation, since edits are blocked once an experiment is
+  // running. Only shown while actively collecting with real progress; any missing/degenerate input
+  // returns null rather than a misleading estimate.
   const remainingEta: string | null = (() => {
     if (status !== 'active' || sampleTxns <= 0 || sampleTxns >= minSample) return null
     const startMs = algorithm.modified_at ? Date.parse(algorithm.modified_at) : NaN
@@ -1165,7 +1178,7 @@ function ExperimentDetailPanel({
     const remainMs = (elapsedMs / sampleTxns) * (minSample - sampleTxns)
     const hrs = remainMs / 3_600_000
     if (!Number.isFinite(hrs) || hrs <= 0) return null
-    const at = 'at current volume'
+    const at = 'to completion at current volume'
     if (hrs < 1) return `~${Math.max(1, Math.round(hrs * 60))} min remaining ${at}`
     if (hrs < 48) return `~${Math.round(hrs)} hrs remaining ${at}`
     return `~${Math.round(hrs / 24)} days remaining ${at}`
@@ -1184,7 +1197,9 @@ function ExperimentDetailPanel({
           label: 'Sample target',
           value: `${minSample.toLocaleString()} txns`,
           icon: BarChart3,
-          caption: 'Collected before a significance verdict',
+          caption: variants.length === 1
+            ? 'Outcomes collected before the experiment completes with a verdict'
+            : 'Outcomes each comparison collects before the experiment completes',
           visual: null,
         },
         {
@@ -1285,10 +1300,12 @@ function ExperimentDetailPanel({
               />
             </div>
             <p className="text-[12px] text-slate-500 max-w-[80ch] leading-4">
-              {progressLabel} of the {minSample.toLocaleString()} needed for a verdict
-              {variants.length > 1 ? ' (control plus each variant; showing the furthest behind)' : ''}
-              {awaitingTxns > 0 ? ` · ${awaitingTxns.toLocaleString()} more awaiting an outcome` : ''}
-              {remainingEta ? ` · ${remainingEta}` : ''}
+              {completedWithVerdict
+                ? `Completed with ${minSample.toLocaleString()} outcomes.`
+                : completedWithoutOutcomes
+                  ? `Completed after routing ${routedTxns.toLocaleString()} payments, twice the target, but only ${sampleTxns.toLocaleString()} of the ${minSample.toLocaleString()} outcomes needed arrived, so there is no verdict. Check that payment feedback is being sent to Decision Engine.`
+                  : `The experiment completes once ${variants.length > 1 ? 'each comparison has' : 'it has'} ${minSample.toLocaleString()} outcomes: ${sampleTxns.toLocaleString()} so far`}
+              {!completedWithVerdict && !completedWithoutOutcomes && remainingEta ? ` · ${remainingEta}` : ''}
             </p>
           </div>
         )}
@@ -1361,12 +1378,6 @@ function ExperimentDetailPanel({
           </p>
         ) : (
           <div className="space-y-4">
-            {totalTxns === 0 && (
-              <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-200">
-                No payments have been recorded for this experiment on {endpoint === 'hybrid_routing' ? 'Hybrid routing' : endpoint === 'decide_gateway' ? 'Decide gateway' : 'Rule evaluate'}.
-                {endpoint === 'hybrid_routing' && ' Decision Simulator uses Decide gateway by default. To test this view, choose More → Endpoint → Hybrid routing, then run new payments for the same merchant while this experiment is active.'}
-              </div>
-            )}
             {/* Statistical rigor first: while the verdict isn't trustworthy, lead with the confidence
                 notice and keep every delta neutral (handled inside the table). */}
             {!significant && (
@@ -1383,6 +1394,13 @@ function ExperimentDetailPanel({
                 (5% split across {results.variants.length} comparisons), so the chance of a false winner across all of them stays at 5%.
               </p>
             )}
+            {earlyGuardrailSignals.map(({ variant: v, drop, variantResolved }) => (
+              <Notice key={`early-${v.metrics.arm}`} tone="warning">
+                Early signal: among completed payments, {variants.length === 1 ? 'the variant' : armName(abData, v.metrics.arm)} is {drop.toFixed(2)}pp below control,
+                past the {abData?.guardrail_threshold_pp}pp guardrail, but on {variantResolved.toLocaleString()} of its payments that is not yet clear of
+                normal variation. The guardrail stops it once the drop is statistically clear, with at least 30 completed payments in each arm.
+              </Notice>
+            ))}
             {breachedVariants.map(v => {
               const name = armName(abData, v.metrics.arm)
               const stopped = variants.find(x => x.id === v.metrics.arm)?.stopped
@@ -1391,12 +1409,12 @@ function ExperimentDetailPanel({
                 <Notice key={v.metrics.arm} tone="danger">
                   Among completed payments, {variants.length === 1 ? 'variant' : name} auth rate dropped {guardrailDropPp(v.metrics)?.toFixed(2)}pp below control — beyond the {abData?.guardrail_threshold_pp}pp guardrail.{' '}
                   {!isActive
-                    ? 'This experiment is inactive. Payments use your active routing setup.'
+                    ? 'This experiment is inactive. Payments use your active routing setup. Activating it again resumes it with the same data, so the guardrail will stop it again; to test a fixed setup, Duplicate it.'
                     : stopped
                       ? `${name} is stopped: its payments now use your live routing setup, while the other variants keep running.`
                       : others > 0
-                        ? `${name} stops when payment feedback confirms the breach, and its payments then use your live routing setup; check feedback delivery if it keeps running.`
-                        : 'The experiment stops when payment feedback confirms the breach; check feedback delivery if it remains active.'}
+                        ? `${name} stops on the next payment outcome Decision Engine receives, and its payments then use your live routing setup. If it keeps running, check that payment feedback is being sent.`
+                        : 'The experiment stops on the next payment outcome Decision Engine receives. If it remains active, check that payment feedback is being sent.'}
                 </Notice>
               )
             })}
@@ -1741,8 +1759,8 @@ function CreateForm({
       />
       <span>percentage points below control</span>
       <InfoHint text={form.variants.length === 1
-        ? 'After both arms have a completed payment, each new outcome checks the saved guardrail and stops a breached experiment, even before the sample target. A value of 3 stops the experiment at 88% vs 92%; new payments use the active routing rule.'
-        : 'Each variant is checked against control on its own, even before the sample target. A breached variant stops and its payments use your live routing setup, while the other variants keep running. When the last running variant breaches, the experiment stops and new payments use the active routing rule.'} />
+        ? 'Each new outcome checks the guardrail, even before the sample target. Once each arm has 30 completed payments, a drop past this many points that is statistically clear stops the experiment: with 3, 88% vs 92% stops it once the gap is clear of normal variation. New payments then use the active routing rule.'
+        : 'Each variant is checked against control on its own, even before the sample target: once each arm has 30 completed payments, a drop past this many points that is statistically clear stops that variant. Its payments then use your live routing setup, while the other variants keep running. When the last running variant breaches, the experiment stops and new payments use the active routing rule.'} />
     </label>
   )
 
