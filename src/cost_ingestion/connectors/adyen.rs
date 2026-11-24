@@ -5,13 +5,18 @@
 //! `gross`/`total_fee`. Everything Adyen-specific (report column names, the notification shape,
 //! the HMAC scheme, the download auth) is contained in this file.
 
-use super::common::{http_client_without_redirects, to_float};
+use super::common::{
+    check_notification_size, http_client_without_redirects, lenient_string,
+    parse_notification_json, string_or_number, to_float,
+};
 
 use async_trait::async_trait;
 use axum::http::HeaderMap;
 use bytes::Bytes;
 use masking::{PeekInterface, Secret};
 use ring::hmac;
+use serde::de::{self, IgnoredAny};
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::cost_ingestion::connectors::csv_reader;
@@ -67,10 +72,8 @@ impl SettlementReportSource for AdyenReportSource {
     }
 
     fn peek_account(&self, raw_body: &[u8]) -> Result<String, IngestError> {
-        let item = notification_item(raw_body)?;
-        item.get("merchantAccountCode")
-            .and_then(Value::as_str)
-            .map(str::to_string)
+        notification_item(raw_body)?
+            .merchant_account_code
             .ok_or_else(|| {
                 IngestError::MalformedNotification("missing merchantAccountCode".to_string())
             })
@@ -86,9 +89,9 @@ impl SettlementReportSource for AdyenReportSource {
 
         // Adyen carries the HMAC in the body (additionalData.hmacSignature), not a header.
         let provided_sig = item
-            .get("additionalData")
-            .and_then(|a| a.get("hmacSignature"))
-            .and_then(Value::as_str)
+            .additional_data
+            .as_ref()
+            .and_then(|a| a.hmac_signature.as_deref())
             .ok_or_else(|| {
                 IngestError::MalformedNotification("missing hmacSignature".to_string())
             })?;
@@ -101,32 +104,23 @@ impl SettlementReportSource for AdyenReportSource {
             return Err(IngestError::SignatureMismatch);
         }
 
-        if item.get("eventCode").and_then(Value::as_str) != Some(REPORT_AVAILABLE) {
+        if item.event_code.as_deref() != Some(REPORT_AVAILABLE) {
             return Err(IngestError::MalformedNotification(
                 "not a REPORT_AVAILABLE notification".to_string(),
             ));
         }
 
-        let account = item
-            .get("merchantAccountCode")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
+        let account = item.merchant_account_code.clone().unwrap_or_default();
         // For REPORT_AVAILABLE the download URL is carried in `reason`; `pspReference` is unique.
-        let report_ref = item
-            .get("reason")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
+        let report_ref = item.reason.clone().unwrap_or_default();
         let notification_id = item
-            .get("pspReference")
-            .and_then(Value::as_str)
+            .psp_reference
+            .clone()
             .filter(|s| !s.is_empty())
-            .unwrap_or(&report_ref)
-            .to_string();
+            .unwrap_or_else(|| report_ref.clone());
         let report_date = item
-            .get("eventDate")
-            .and_then(Value::as_str)
+            .event_date
+            .as_deref()
             .and_then(|d| d.get(0..10))
             .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
 
@@ -297,104 +291,172 @@ impl SettlementReportSource for AdyenReportSource {
     }
 }
 
-/// Normalize an Adyen webhook body into a single `NotificationRequestItem`-shaped object,
-/// accepting both formats Adyen can post: the JSON envelope
-/// (`{"notificationItems":[{"NotificationRequestItem":{…}}]}`) and the legacy / "Test
-/// configuration" `application/x-www-form-urlencoded` post (flat `key=value` pairs, with the
-/// signature under `additionalData.hmacSignature` and amount split across `value`/`currency`).
-/// Everything downstream (`hmac_payload`, field extraction) reads this one shape.
-fn notification_item(raw_body: &[u8]) -> Result<Value, IngestError> {
-    // JSON envelope first: a form-urlencoded body isn't valid JSON, so this falls through.
-    if let Ok(v) = serde_json::from_slice::<Value>(raw_body) {
-        if let Some(item) = first_item(&v) {
-            return Ok(item.clone());
-        }
-        // Tolerate a bare NotificationRequestItem posted without the envelope.
-        if v.get("merchantAccountCode").is_some() {
-            return Ok(v);
-        }
-        return Err(IngestError::MalformedNotification(
-            "no NotificationRequestItem".to_string(),
-        ));
+/// The `NotificationRequestItem` fields this connector reads; everything else Adyen sends is
+/// skipped while parsing.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NotificationItem {
+    #[serde(default, deserialize_with = "lenient_string")]
+    psp_reference: Option<String>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    original_reference: Option<String>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    merchant_account_code: Option<String>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    merchant_reference: Option<String>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    event_code: Option<String>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    event_date: Option<String>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    success: Option<String>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    reason: Option<String>,
+    #[serde(default)]
+    amount: Option<Amount>,
+    #[serde(default)]
+    additional_data: Option<AdditionalData>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct Amount {
+    /// Minor units: a JSON number in the JSON envelope, a string in the form post.
+    #[serde(default, deserialize_with = "string_or_number")]
+    value: Option<String>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    currency: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct AdditionalData {
+    #[serde(rename = "hmacSignature", default, deserialize_with = "lenient_string")]
+    hmac_signature: Option<String>,
+}
+
+/// Adyen's JSON envelope: `{"notificationItems":[{"NotificationRequestItem":{…}}]}`. Only the first
+/// item is read.
+#[derive(Deserialize)]
+struct Envelope {
+    #[serde(
+        rename = "notificationItems",
+        default,
+        deserialize_with = "first_entry"
+    )]
+    first: Option<EnvelopeEntry>,
+}
+
+#[derive(Deserialize)]
+struct EnvelopeEntry {
+    #[serde(rename = "NotificationRequestItem", default)]
+    item: Option<NotificationItem>,
+}
+
+/// Normalize an Adyen webhook body into a single [`NotificationItem`], accepting both formats Adyen
+/// can post: the JSON envelope and the legacy / "Test configuration"
+/// `application/x-www-form-urlencoded` post (flat `key=value` pairs, with the signature under
+/// `additionalData.hmacSignature` and amount split across `value`/`currency`). A bare
+/// `NotificationRequestItem` posted without the envelope is accepted too.
+fn notification_item(raw_body: &[u8]) -> Result<NotificationItem, IngestError> {
+    check_notification_size(raw_body)?;
+    // A JSON body is an object; a form-urlencoded one never starts with `{`.
+    if raw_body.trim_ascii_start().first() != Some(&b'{') {
+        return Ok(form_to_item(raw_body));
     }
-    Ok(form_to_item(raw_body))
+    if let Some(item) = parse_notification_json::<Envelope>(raw_body)?
+        .first
+        .and_then(|e| e.item)
+    {
+        return Ok(item);
+    }
+    let bare = parse_notification_json::<NotificationItem>(raw_body)?;
+    if bare.merchant_account_code.is_some() {
+        return Ok(bare);
+    }
+    Err(IngestError::MalformedNotification(
+        "no NotificationRequestItem".to_string(),
+    ))
 }
 
-/// First `NotificationRequestItem` in an Adyen JSON webhook envelope.
-fn first_item(v: &Value) -> Option<&Value> {
-    v.get("notificationItems")?
-        .as_array()?
-        .first()?
-        .get("NotificationRequestItem")
+/// `deserialize_with` for `notificationItems`: the first entry, with the rest skipped unread.
+fn first_entry<'de, D: de::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<EnvelopeEntry>, D::Error> {
+    struct FirstEntry;
+
+    impl<'de> de::Visitor<'de> for FirstEntry {
+        type Value = Option<EnvelopeEntry>;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("an array of notification items")
+        }
+
+        fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+            let first = seq.next_element::<EnvelopeEntry>()?;
+            while seq.next_element::<IgnoredAny>()?.is_some() {}
+            Ok(first)
+        }
+    }
+
+    deserializer.deserialize_any(FirstEntry)
 }
 
-/// Rebuild the `NotificationRequestItem` shape from Adyen's flat form-urlencoded post: `value` and
-/// `currency` fold into a nested `amount`, and dotted keys (`additionalData.hmacSignature`) become
-/// nested objects. All values stay strings — `hmac_payload`/`value_to_string` handle that.
-fn form_to_item(raw_body: &[u8]) -> Value {
-    let mut item = serde_json::Map::new();
-    let mut amount = serde_json::Map::new();
-    let mut additional = serde_json::Map::new();
+/// Build a [`NotificationItem`] from Adyen's flat form-urlencoded post: `value` and `currency` fold
+/// into `amount`, and `additionalData.hmacSignature` into `additional_data`. Other keys are ignored.
+fn form_to_item(raw_body: &[u8]) -> NotificationItem {
+    let mut item = NotificationItem::default();
+    let mut amount = Amount::default();
+    let mut additional = AdditionalData::default();
     for (k, v) in form_urlencoded::parse(raw_body) {
-        let value = Value::String(v.into_owned());
-        match k.as_ref() {
-            "value" => {
-                amount.insert("value".to_string(), value);
-            }
-            "currency" => {
-                amount.insert("currency".to_string(), value);
-            }
-            key => match key.strip_prefix("additionalData.") {
-                Some(sub) => {
-                    additional.insert(sub.to_string(), value);
-                }
-                None => {
-                    item.insert(key.to_string(), value);
-                }
-            },
-        }
+        let slot = match k.as_ref() {
+            "pspReference" => &mut item.psp_reference,
+            "originalReference" => &mut item.original_reference,
+            "merchantAccountCode" => &mut item.merchant_account_code,
+            "merchantReference" => &mut item.merchant_reference,
+            "eventCode" => &mut item.event_code,
+            "eventDate" => &mut item.event_date,
+            "success" => &mut item.success,
+            "reason" => &mut item.reason,
+            "value" => &mut amount.value,
+            "currency" => &mut amount.currency,
+            "additionalData.hmacSignature" => &mut additional.hmac_signature,
+            _ => continue,
+        };
+        *slot = Some(v.into_owned());
     }
-    if !amount.is_empty() {
-        item.insert("amount".to_string(), Value::Object(amount));
+    if amount.value.is_some() || amount.currency.is_some() {
+        item.amount = Some(amount);
     }
-    if !additional.is_empty() {
-        item.insert("additionalData".to_string(), Value::Object(additional));
+    if additional.hmac_signature.is_some() {
+        item.additional_data = Some(additional);
     }
-    Value::Object(item)
+    item
 }
 
 /// Adyen's colon-joined, backslash-escaped signing payload (standard-notification field order).
-fn hmac_payload(item: &Value) -> String {
-    let f = |key: &str| -> String {
-        item.get(key)
-            .and_then(Value::as_str)
+fn hmac_payload(item: &NotificationItem) -> String {
+    let f = |field: &Option<String>| -> String {
+        field
+            .as_deref()
             .unwrap_or_default()
             .replace('\\', "\\\\")
             .replace(':', "\\:")
     };
+    let amount = item.amount.as_ref();
     [
-        f("pspReference"),
-        f("originalReference"),
-        f("merchantAccountCode"),
-        f("merchantReference"),
-        item.pointer("/amount/value")
-            .map(value_to_string)
-            .unwrap_or_default(),
-        item.pointer("/amount/currency")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
-        f("eventCode"),
-        f("success"),
+        f(&item.psp_reference),
+        f(&item.original_reference),
+        f(&item.merchant_account_code),
+        f(&item.merchant_reference),
+        amount.and_then(|a| a.value.clone()).unwrap_or_default(),
+        amount.and_then(|a| a.currency.clone()).unwrap_or_default(),
+        f(&item.event_code),
+        f(&item.success),
     ]
     .join(":")
-}
-
-fn value_to_string(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }
 }
 
 /// HMAC-SHA256 over `payload` with a hex-encoded Adyen key, base64-compared in constant time.
@@ -617,7 +679,9 @@ ref2,Settled,visastandarddebit,visa,FR,EUR,100.00,0.05,0.00,0.02,0.20,\"[{\"\"t\
             "amount": { "value": 0, "currency": "EUR" },
         });
         let key = hmac::Key::new(hmac::HMAC_SHA256, b"test");
-        let sig = base64_encode(hmac::sign(&key, hmac_payload(&item).as_bytes()).as_ref());
+        let parsed: NotificationItem =
+            parse_notification_json(&serde_json::to_vec(&item).expect("item")).expect("item");
+        let sig = base64_encode(hmac::sign(&key, hmac_payload(&parsed).as_bytes()).as_ref());
         item["additionalData"] = serde_json::json!({ "hmacSignature": sig });
         serde_json::to_vec(&serde_json::json!({
             "notificationItems": [{ "NotificationRequestItem": item }]
@@ -669,6 +733,67 @@ ref2,Settled,visastandarddebit,visa,FR,EUR,100.00,0.05,0.00,0.02,0.20,\"[{\"\"t\
             parse(&signed_notification("AUTHORISATION", url)),
             Err(IngestError::MalformedNotification(_))
         ));
+    }
+
+    #[test]
+    fn a_signed_form_post_is_accepted() {
+        let url = "https://ca-test.adyen.com/reports/download/MerchantAccount/Acct/report.csv";
+        let unsigned = format!(
+            "pspReference=PSP2&merchantAccountCode=Acct&eventCode={REPORT_AVAILABLE}\
+             &success=true&reason={}&value=0&currency=EUR",
+            form_urlencoded::byte_serialize(url.as_bytes()).collect::<String>()
+        );
+        let key = hmac::Key::new(hmac::HMAC_SHA256, b"test");
+        let payload = hmac_payload(&form_to_item(unsigned.as_bytes()));
+        let sig = base64_encode(hmac::sign(&key, payload.as_bytes()).as_ref());
+        let body = format!(
+            "{unsigned}&additionalData.hmacSignature={}",
+            form_urlencoded::byte_serialize(sig.as_bytes()).collect::<String>()
+        );
+        let note = parse(body.as_bytes()).expect("accepted");
+        assert_eq!(note.report_ref, url);
+        assert_eq!(note.notification_id, "PSP2");
+    }
+
+    #[test]
+    fn the_account_is_read_from_the_first_item_or_a_bare_item() {
+        let source = AdyenReportSource::new();
+        let envelope = serde_json::json!({
+            "live": "false",
+            "notificationItems": [
+                { "NotificationRequestItem": {
+                    "merchantAccountCode": "First",
+                    "amount": { "value": 1000, "currency": "EUR" },
+                    "additionalData": { "nested": { "deep": [1, 2, 3] } },
+                    "operations": ["CAPTURE"]
+                } },
+                { "NotificationRequestItem": { "merchantAccountCode": "Second" } }
+            ]
+        });
+        let body = serde_json::to_vec(&envelope).expect("body");
+        assert_eq!(source.peek_account(&body).expect("account"), "First");
+
+        let bare = br#"{"merchantAccountCode":"Bare","success":true}"#;
+        assert_eq!(source.peek_account(bare).expect("account"), "Bare");
+
+        assert!(matches!(
+            source.peek_account(br#"{"notificationItems":[]}"#),
+            Err(IngestError::MalformedNotification(_))
+        ));
+    }
+
+    #[test]
+    fn an_oversized_body_is_refused_before_parsing() {
+        let source = AdyenReportSource::new();
+        let pad = "x".repeat(crate::cost_ingestion::source::MAX_NOTIFICATION_BYTES);
+        let json = format!(r#"{{"merchantAccountCode":"Acct","pad":"{pad}"}}"#);
+        let form = format!("merchantAccountCode=Acct&pad={pad}");
+        for body in [json, form] {
+            assert!(matches!(
+                source.peek_account(body.as_bytes()),
+                Err(IngestError::MalformedNotification(_))
+            ));
+        }
     }
 
     #[test]
