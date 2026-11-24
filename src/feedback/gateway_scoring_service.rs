@@ -622,9 +622,21 @@ pub async fn check_and_update_gateway_score_(
             let log_message = "update_gateway_score";
             let enforce_failure = api_payload.enforce_dynamic_routing_failure.unwrap_or(false);
 
-            // A failed payment's context stays until its TTL, so a retry on another connector is
-            // still scored; a succeeded one's is cut to after_success_ttl_secs. The score lock
-            // keeps a repeated update from counting twice.
+            // A failed or pending payment's context stays until its TTL, so a retry on another
+            // connector is still scored. A succeeded one's is cut to after_success_ttl_secs: an
+            // update after that finds no context and is skipped. Scoring uses the context already
+            // read, so cutting it first is safe. The score lock keeps a repeat from counting twice.
+            let lock_ttl_after_success = if !enforce_failure && is_final_success(&txn_detail.status)
+            {
+                expire_context_after_success(
+                    &redis_key,
+                    &api_payload.merchant_id,
+                    &api_payload.payment_id,
+                )
+                .await
+            } else {
+                None
+            };
             // Call the function to check and update the gateway score
             check_and_update_gateway_score(
                 txn_detail,
@@ -640,6 +652,7 @@ pub async fn check_and_update_gateway_score_(
                 ),
                 None,
                 Some(gateway_scoring_data),
+                lock_ttl_after_success,
             )
             .await;
 
@@ -716,6 +729,7 @@ pub async fn check_and_update_gateway_score(
     score_snapshot_flow: crate::analytics::AnalyticsFlowContext,
     redis_comp_config: Option<RedisCompressionConfigCombined>,
     gateway_scoring_data: Option<GatewayScoringData>,
+    lock_ttl_after_success: Option<i64>,
 ) -> () {
     // Get gateway scoring type
     let gateway_scoring_type =
@@ -724,40 +738,20 @@ pub async fn check_and_update_gateway_score(
     let gateway_in_string = txn_detail.gateway.clone().unwrap_or_default();
 
     let merchant_id = get_m_id(txn_detail.merchantId.clone());
-    let txn_uuid = txn_detail.txnUuid.clone();
-    let ends_the_payment = matches!(gateway_scoring_type, GatewayScoringType::Reward)
-        && is_final_success(&txn_detail.status);
-
-    // The context the caller read; the legacy `/update-score` passes none, so it is read here.
-    let gateway_scoring_data = match gateway_scoring_data {
-        Some(data) => Some(data),
-        None => {
-            let redis_key = scoring_data_redis_key(&merchant_id, &txn_uuid).await;
-            get_tenant_app_state()
-                .await
-                .redis_conn
-                .get_key::<StoredGatewayScoringData>(&redis_key, "GatewayScoringData")
-                .await
-                .ok()
-                .map(GatewayScoringData::from)
-        }
-    };
-    let owns_context = gateway_scoring_data
-        .as_ref()
-        .is_some_and(|data| data.merchantId == merchant_id);
-
     let update_score_lock_key = update_gateway_score_lock(
         gateway_scoring_type.clone(),
         &merchant_id,
-        &txn_uuid,
+        &txn_detail.txnUuid,
         &gateway_in_string,
     );
-    // The lock lasts as long as the context, so a repeat is dropped for as long as it could score.
-    let lock_key_ttl =
+    // The lock lasts as long as the context, so a repeat is dropped for as long as it could score:
+    // the full TTL, or the shorter one the caller has already cut a succeeded payment's context to.
+    let full_ttl =
         crate::decider::gatewaydecider::flow_new::scoring_data_ttl_secs(&merchant_id).await;
+    let lock_key_ttl = lock_ttl_after_success.map_or(full_ttl, |ttl| ttl.min(full_ttl));
 
     let should_compute_gw_score = check_and_send_should_update_gateway_score(
-        update_score_lock_key.clone(),
+        update_score_lock_key,
         lock_key_ttl,
         redis_comp_config.clone(),
     )
@@ -796,34 +790,33 @@ pub async fn check_and_update_gateway_score(
             gateway_in_string,
         );
     }
-
-    if ends_the_payment && owns_context {
-        expire_after_success(&merchant_id, &txn_uuid, &update_score_lock_key).await;
-    }
 }
 
-/// Cuts a succeeded payment's context, and the lock its success took, to
-/// `scoring_data.after_success_ttl_secs`. A TTL already shorter is kept. The context goes first
-/// so the lock never lapses while the context can still score a repeat.
-async fn expire_after_success(merchant_id: &str, payment_id: &str, success_lock_key: &str) {
+/// Cuts a succeeded payment's context to `scoring_data.after_success_ttl_secs`, keeping a TTL
+/// already shorter, and returns the TTL its success lock should take. None, so the lock keeps the
+/// full TTL, when the setting is off or the context could not be cut: the lock must not lapse
+/// while the context can still score a repeat.
+async fn expire_context_after_success(
+    context_key: &str,
+    merchant_id: &str,
+    payment_id: &str,
+) -> Option<i64> {
     let app_state = get_tenant_app_state().await;
-    let Some(ttl) = app_state.config.scoring_data.after_success_ttl_secs() else {
-        return;
-    };
-    let redis = &app_state.redis_conn;
-    let context_key = scoring_data_redis_key(merchant_id, payment_id).await;
-    for key in [context_key.as_str(), success_lock_key] {
-        if let Err(error) = redis.shorten_expiry(key, ttl).await {
-            // The key keeps its full TTL, so this costs memory, not correctness.
+    let ttl = app_state.config.scoring_data.after_success_ttl_secs()?;
+    match app_state.redis_conn.shorten_expiry(context_key, ttl).await {
+        Ok(_) => Some(ttl),
+        Err(error) => {
+            // The context keeps its full TTL, so this costs memory, not correctness.
             logger::warn!(
                 action = "SCORING_DATA_EXPIRE_AFTER_SUCCESS_FAILED",
                 tag = "SCORING_DATA_EXPIRE_AFTER_SUCCESS_FAILED",
                 merchant_id = %merchant_id,
                 payment_id = %payment_id,
                 error = ?error,
-                "Could not shorten a succeeded payment's scoring key {}",
-                key,
+                "Could not shorten a succeeded payment's scoring context {}",
+                context_key,
             );
+            None
         }
     }
 }
@@ -898,6 +891,21 @@ pub async fn update_gateway_score(
         is_routing_approach_in_explore(routing_approach.clone())
     } else {
         true
+    };
+
+    // The context the caller read; the legacy `/update-score` passes none, so it is read here.
+    let gateway_scoring_data = match gateway_scoring_data {
+        Some(data) => Some(data),
+        None => {
+            let redis_key = scoring_data_redis_key(&merchant_id, &txn_detail.txnUuid).await;
+            get_tenant_app_state()
+                .await
+                .redis_conn
+                .get_key::<StoredGatewayScoringData>(&redis_key, "GatewayScoringData")
+                .await
+                .ok()
+                .map(GatewayScoringData::from)
+        }
     };
 
     let redis_gateway_score_data_initial: Option<GatewayScoringData> =

@@ -100,14 +100,10 @@ impl Default for AbTestSettings {
 pub struct ScoringDataConfig {
     pub default_ttl_secs: i64,
     pub max_ttl_secs: i64,
-    /// Seconds a payment's context and its success lock stay once the payment succeeds; 0 keeps
-    /// them for their full TTL. Otherwise at least `MIN_AFTER_SUCCESS_TTL_SECS`.
+    /// Seconds a payment's context and its success lock stay once `/update-gateway-score`
+    /// reports it succeeded; 0 keeps them for their full TTL.
     pub after_success_ttl_secs: i64,
 }
-
-/// The shortest `after_success_ttl_secs`: the 5 minutes the success lock always lasted, which the
-/// legacy `/update-score` relies on to drop a repeated success that has no context.
-pub const MIN_AFTER_SUCCESS_TTL_SECS: i64 = 300;
 
 // 30 minutes by default, 3 days at most, 15 minutes after a success, when the config leaves them out.
 impl Default for ScoringDataConfig {
@@ -1389,8 +1385,7 @@ impl GlobalConfig {
                 )
             ));
         }
-        let after_success = self.scoring_data.after_success_ttl_secs;
-        if after_success != 0 && after_success < MIN_AFTER_SUCCESS_TTL_SECS {
+        if self.scoring_data.after_success_ttl_secs < 0 {
             return Err(error_stack::report!(
                 error::ConfigurationError::InvalidConfigurationValueError(
                     "scoring_data.after_success_ttl_secs".to_string(),
@@ -1525,16 +1520,16 @@ mod tests {
         assert_eq!(config.after_success_ttl_secs(), None);
     }
 
-    // Below the 5-minute floor a repeated legacy success could be scored twice, so it is refused.
+    // A negative after-success TTL is refused; 0 and any positive value start.
     #[test]
-    fn after_success_ttl_below_the_floor_is_rejected() {
+    fn after_success_ttl_must_not_be_negative() {
         let mut config = GlobalConfig::new().expect("failed to parse the development config");
-        config.scoring_data.after_success_ttl_secs = MIN_AFTER_SUCCESS_TTL_SECS - 1;
+        config.scoring_data.after_success_ttl_secs = -1;
         assert!(config.validate().is_err());
-        config.scoring_data.after_success_ttl_secs = MIN_AFTER_SUCCESS_TTL_SECS;
-        config.validate().expect("the floor itself is allowed");
-        config.scoring_data.after_success_ttl_secs = 0;
-        config.validate().expect("0 turns it off");
+        for ttl in [0, 60, 900] {
+            config.scoring_data.after_success_ttl_secs = ttl;
+            config.validate().expect("0 or a positive TTL is allowed");
+        }
     }
 
     // A merchant's TTL is used as is, or cut to the max when above it.
