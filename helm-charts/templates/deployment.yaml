@@ -80,7 +80,7 @@ spec:
             - name: GROOVY_RUNNER_HOST
               value: "{{ include "decision-engine.groovyRunnerName" . }}:{{ .Values.groovyRunner.service.port }}"
             - name: DECISION_ENGINE__SERVER__ALLOW_PLACEHOLDER_SECRETS
-              value: "false"
+              value: {{ .Values.decisionEngine.server.allowPlaceholderSecrets | toString | quote }}
             - name: DECISION_ENGINE__ANALYTICS__ENABLED
               value: {{ ternary "true" "false" .Values.analytics.enabled | quote }}
             - name: DECISION_ENGINE__ANALYTICS__KAFKA__BROKERS

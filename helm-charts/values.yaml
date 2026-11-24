@@ -129,6 +129,8 @@ decisionEngine:
   server:
     host: "0.0.0.0"
     port: 8080
+    # Boot fails on the shipped placeholder admin and JWT secrets unless this is true
+    allowPlaceholderSecrets: false
   # Metrics server configurations
   metrics:
     host: "0.0.0.0"
