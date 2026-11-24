@@ -49,9 +49,9 @@ cpu-time = "1.0.0"
 jemallocator = "0.5"
 jemalloc-ctl = "0.5"
 # OpenTelemetry metrics pushed over OTLP to the otel-collector, as Hyperswitch does; `internal-logs` surfaces export failures in tracing.
-opentelemetry = { version = "0.27.1", default-features = false, features = ["metrics", "internal-logs"] }
-opentelemetry_sdk = { version = "0.27.1", default-features = false, features = ["metrics", "rt-tokio", "internal-logs"] }
-opentelemetry-otlp = { version = "0.27.0", default-features = false, features = ["grpc-tonic", "metrics", "internal-logs"] }
+opentelemetry = { version = "0.33.1", default-features = false, features = ["metrics", "internal-logs"] }
+opentelemetry_sdk = { version = "0.33.1", default-features = false, features = ["metrics", "internal-logs"] }
+opentelemetry-otlp = { version = "0.33.1", default-features = false, features = ["grpc-tonic", "metrics", "internal-logs"] }
 zstd = { version = "0.13.4", optional = true }
 
 async-bb8-diesel = { git = "https://github.com/jarnura/async-bb8-diesel", rev = "53b4ab901aab7635c8215fd1c2d542c8db443094" }
@@ -120,7 +120,7 @@ regex = "1.10"
 # -------------------------------------
 
 [dev-dependencies]
-opentelemetry_sdk = { version = "0.27.1", default-features = false, features = ["metrics", "rt-tokio", "internal-logs", "testing"] }
+opentelemetry_sdk = { version = "0.33.1", default-features = false, features = ["metrics", "internal-logs", "testing"] }
 # `test-util` gives tests the paused clock the clickhouse guard's timing tests run on.
 tokio = { version = "1.44.2", features = ["macros", "rt", "test-util"] }
 rand = "0.8.5"
@@ -130,7 +130,7 @@ axum-test = "15.6.0"
 
 [build-dependencies]
 cargo_metadata = "0.18.1"
-vergen = { version = "8.3.2", features = ["git", "git2"] }
+vergen = { version = "8.3.2", features = ["git", "gitcl"] }
 
 [lints.rust]
 unsafe_code = "forbid"

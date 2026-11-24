@@ -411,35 +411,39 @@ fn resource() -> opentelemetry_sdk::Resource {
     if let Ok(pod) = std::env::var("POD_NAME") {
         attributes.push(KeyValue::new("pod", pod));
     }
-    opentelemetry_sdk::Resource::new(attributes)
+    // builder_empty skips the default detectors, which would otherwise add their own service.name
+    // and a telemetry.sdk.* set the collector never saw before
+    opentelemetry_sdk::Resource::builder_empty()
+        .with_attributes(attributes)
+        .build()
 }
 
-fn build_otlp_reader(config: &LogTelemetry) -> error_stack::Result<PeriodicReader, MetricsError> {
+fn build_otlp_reader(
+    config: &LogTelemetry,
+) -> error_stack::Result<PeriodicReader<opentelemetry_otlp::MetricExporter>, MetricsError> {
     use opentelemetry_otlp::WithExportConfig;
 
-    let mut export_config = opentelemetry_otlp::ExportConfig {
-        protocol: opentelemetry_otlp::Protocol::Grpc,
-        endpoint: config.otel_exporter_otlp_endpoint.clone(),
-        ..Default::default()
-    };
-    if let Some(timeout_ms) = config.otel_exporter_otlp_timeout {
-        export_config.timeout = Duration::from_millis(timeout_ms);
-    }
-
-    let exporter = opentelemetry_otlp::MetricExporter::builder()
+    // The export timeout lives on the exporter now, the reader only owns the interval
+    let mut builder = opentelemetry_otlp::MetricExporter::builder()
         .with_tonic()
         // The collector's prometheus exporter needs cumulative sums.
         .with_temporality(Temporality::Cumulative)
-        .with_export_config(export_config)
+        .with_protocol(opentelemetry_otlp::Protocol::Grpc)
+        .with_timeout(Duration::from_secs(EXPORT_TIMEOUT_SECS));
+    if let Some(endpoint) = &config.otel_exporter_otlp_endpoint {
+        builder = builder.with_endpoint(endpoint);
+    }
+    if let Some(timeout_ms) = config.otel_exporter_otlp_timeout {
+        builder = builder.with_timeout(Duration::from_millis(timeout_ms));
+    }
+
+    let exporter = builder
         .build()
         .change_context(MetricsError::ExporterSetup)?;
 
-    Ok(
-        PeriodicReader::builder(exporter, opentelemetry_sdk::runtime::Tokio)
-            .with_interval(Duration::from_secs(EXPORT_INTERVAL_SECS))
-            .with_timeout(Duration::from_secs(EXPORT_TIMEOUT_SECS))
-            .build(),
-    )
+    Ok(PeriodicReader::builder(exporter)
+        .with_interval(Duration::from_secs(EXPORT_INTERVAL_SECS))
+        .build())
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -451,17 +455,17 @@ pub enum MetricsError {
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use opentelemetry_sdk::metrics::data;
-    use opentelemetry_sdk::testing::metrics::InMemoryMetricExporter;
+    use opentelemetry_sdk::metrics::data::{self, AggregatedMetrics, MetricData};
+    use opentelemetry_sdk::metrics::InMemoryMetricExporter;
 
     use super::*;
 
     fn find<'a>(metrics: &'a [data::ResourceMetrics], name: &str) -> &'a data::Metric {
         metrics
             .iter()
-            .flat_map(|resource| resource.scope_metrics.iter())
-            .flat_map(|scope| scope.metrics.iter())
-            .find(|metric| metric.name == name)
+            .flat_map(|resource| resource.scope_metrics())
+            .flat_map(|scope| scope.metrics())
+            .find(|metric| metric.name() == name)
             .unwrap_or_else(|| panic!("metric {name} was not exported"))
     }
 
@@ -469,7 +473,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn facade_exports_plain_names_labels_and_values() {
         let exporter = InMemoryMetricExporter::default();
-        let reader = PeriodicReader::builder(exporter.clone(), opentelemetry_sdk::runtime::Tokio)
+        let reader = PeriodicReader::builder(exporter.clone())
             .with_interval(Duration::from_secs(3600))
             .build();
         let provider = SdkMeterProvider::builder()
@@ -500,37 +504,40 @@ mod tests {
         provider.force_flush().expect("flush");
         let exported = exporter.get_finished_metrics().expect("exported metrics");
 
-        let sum = find(&exported, "metrics_facade_test_total")
-            .data
-            .as_any()
-            .downcast_ref::<data::Sum<u64>>()
-            .expect("counter is a u64 sum");
-        assert!(sum.is_monotonic);
-        assert_eq!(sum.data_points.len(), 1);
-        assert_eq!(sum.data_points[0].value, 3);
+        let AggregatedMetrics::U64(MetricData::Sum(sum)) =
+            find(&exported, "metrics_facade_test_total").data()
+        else {
+            panic!("counter is a u64 sum")
+        };
+        assert!(sum.is_monotonic());
+        assert_eq!(sum.data_points().count(), 1);
+        let point = sum.data_points().next().expect("counter data point");
+        assert_eq!(point.value(), 3);
         assert_eq!(
-            sum.data_points[0].attributes,
+            point.attributes().cloned().collect::<Vec<_>>(),
             vec![KeyValue::new("endpoint", "decide")]
         );
 
-        let hist = find(&exported, "metrics_facade_test_seconds")
-            .data
-            .as_any()
-            .downcast_ref::<data::Histogram<f64>>()
-            .expect("histogram is f64");
-        assert_eq!(hist.data_points.len(), 1);
-        assert_eq!(hist.data_points[0].count, 2);
-        assert_eq!(hist.data_points[0].bounds.len(), 10);
-        assert_eq!(hist.data_points[0].bounds[0], 0.0005);
+        let AggregatedMetrics::F64(MetricData::Histogram(hist)) =
+            find(&exported, "metrics_facade_test_seconds").data()
+        else {
+            panic!("histogram is f64")
+        };
+        assert_eq!(hist.data_points().count(), 1);
+        let point = hist.data_points().next().expect("histogram data point");
+        assert_eq!(point.count(), 2);
+        assert_eq!(point.bounds().count(), 10);
+        assert_eq!(point.bounds().next(), Some(0.0005));
 
-        let gauge = find(&exported, "metrics_facade_test_depth")
-            .data
-            .as_any()
-            .downcast_ref::<data::Gauge<i64>>()
-            .expect("gauge is i64");
-        assert_eq!(gauge.data_points[0].value, 7);
+        let AggregatedMetrics::I64(MetricData::Gauge(gauge)) =
+            find(&exported, "metrics_facade_test_depth").data()
+        else {
+            panic!("gauge is i64")
+        };
+        let point = gauge.data_points().next().expect("gauge data point");
+        assert_eq!(point.value(), 7);
         assert_eq!(
-            gauge.data_points[0].attributes,
+            point.attributes().cloned().collect::<Vec<_>>(),
             vec![KeyValue::new("stream", "api")]
         );
     }
