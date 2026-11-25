@@ -5905,7 +5905,45 @@
               "object",
               "null"
             ],
-            "description": "Gateway error details for the GSM-based scoring filter. When present and the merchant flag is on, user/issuer-originated failures are skipped so the gateway is not penalised."
+            "description": "The failure, looked up in the GSM rules for `gsm_info` and the GSM-based scoring filter. The connector is taken from `gateway` (its merchant connector id dropped), so it is not sent here; a `connector` field is ignored.",
+            "properties": {
+              "flow": {
+                "type": "string",
+                "example": "Payment"
+              },
+              "subFlow": {
+                "type": "string",
+                "example": "Authorize"
+              },
+              "errorCode": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "example": "14"
+              },
+              "errorMessage": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "example": "Acquirer Fraud"
+              },
+              "issuerErrorCode": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "With `cardNetwork`, looked up first as the issuer rule."
+              },
+              "cardNetwork": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "example": "Visa"
+              }
+            }
           },
           "isSmartRetry": {
             "type": [
@@ -5936,7 +5974,7 @@
               "object",
               "null"
             ],
-            "description": "GSM lookup result. Present only when `errorInfo` was supplied and a matching rule was found."
+            "description": "GSM lookup result. Present only when `errorInfo` was supplied and a matching rule was found, matched on the connector name in `gateway`. For `decision: retry`, `retryConnectors` lists the `connector:merchant_connector_id` identifiers to retry on, best current success rate first, excluding the failed connector and any already reported for this payment; it is `[]` when every eligible connector has been tried, and `null` for `do_default`."
           }
         }
       },

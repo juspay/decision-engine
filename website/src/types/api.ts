@@ -850,6 +850,7 @@ export interface GsmInfo {
   stepUpPossible: boolean
   clearPanPossible: boolean
   alternateNetworkPossible: boolean
+  retryConnectors: string[] | null
   unifiedCode: string | null
   unifiedMessage: string | null
   errorCategory: string | null

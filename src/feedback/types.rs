@@ -608,3 +608,29 @@ impl crate::analytics::payload::ApiEventPayload for UpdateScorePayload {
         Some(&self.payment_id)
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::UpdateScorePayload;
+
+    // `errorInfo` no longer carries the connector; one older callers still send is ignored.
+    #[test]
+    fn an_error_info_connector_is_ignored() {
+        let payload: UpdateScorePayload = serde_json::from_value(serde_json::json!({
+            "merchantId": "m", "gateway": "adyen:mca_ad", "gatewayReferenceId": null,
+            "status": "AUTHORIZATION_FAILED", "paymentId": "p",
+            "enforceDynamicRoutingFailure": null, "txnLatency": null,
+            "errorInfo": {"connector": "stripe", "flow": "Payment", "subFlow": "Authorize",
+                "errorCode": "14", "errorMessage": "Acquirer Fraud",
+                "issuerErrorCode": null, "cardNetwork": null}
+        }))
+        .expect("an update with an old-style errorInfo");
+        let error_info = payload.error_info.expect("errorInfo");
+        assert_eq!(error_info.error_code.as_deref(), Some("14"));
+        assert!(!serde_json::to_value(&error_info)
+            .expect("serialisable")
+            .as_object()
+            .is_some_and(|fields| fields.contains_key("connector")));
+    }
+}

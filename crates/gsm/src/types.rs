@@ -68,11 +68,10 @@ pub struct GsmRule {
     pub feature: Option<String>,
 }
 
-/// Error context from a failed payment attempt, used as input for a GSM lookup.
+/// Error context from a failed payment attempt; the connector is passed to the lookup alongside it.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GsmErrorInfo {
-    pub connector: String,
     #[serde(default)]
     pub flow: String,
     #[serde(default)]
@@ -98,6 +97,9 @@ pub struct GsmInfo {
     pub standardised_code: Option<String>,
     pub description: Option<String>,
     pub user_guidance_message: Option<String>,
+    /// `null` for `do_default`; for `retry`, the connectors to retry on, best first (`[]` when all were tried).
+    #[serde(default)]
+    pub retry_connectors: Option<Vec<String>>,
 }
 
 /// One row in the `/gsm/options` response.

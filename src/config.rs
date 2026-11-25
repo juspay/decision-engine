@@ -67,8 +67,9 @@ pub struct GlobalConfig {
     pub volume_commitment: VolumeCommitmentConfig,
     #[serde(default)]
     pub sr_auto_calibration: SrAutoCalibrationConfig,
-    #[serde(default)]
-    pub card_info_service: CardInfoServiceConfig,
+    /// `[hyperswitch_service]`, read as `[card_info_service]` too, its earlier name.
+    #[serde(default, alias = "card_info_service")]
+    pub hyperswitch_service: HyperswitchServiceConfig,
     /// Scoring-context TTL settings; defaults apply when the section is missing.
     #[serde(default)]
     pub scoring_data: ScoringDataConfig,
@@ -102,25 +103,42 @@ impl ScoringDataConfig {
     }
 }
 
-/// Configuration for the external Hyperswitch cards-info API used to enrich a payment's
-/// card attributes from its BIN (see the BIN-enrichment step in `flow_new`).
+/// Hyperswitch APIs Decision Engine calls as a merchant: cards-info (BIN) and GSM lookups.
 #[derive(Clone, serde::Deserialize, Debug)]
 #[serde(default)]
-pub struct CardInfoServiceConfig {
+pub struct HyperswitchServiceConfig {
+    /// Hyperswitch's root URL; each lookup adds its own path.
     pub base_url: String,
     pub api_key: masking::Secret<String>,
     pub timeout_ms: u64,
     pub tenant_id: String,
 }
 
-impl Default for CardInfoServiceConfig {
+impl Default for HyperswitchServiceConfig {
     fn default() -> Self {
         Self {
-            base_url: "https://integ.hyperswitch.io/api/cards".to_string(),
+            base_url: "https://integ.hyperswitch.io/api".to_string(),
             api_key: masking::Secret::new(String::new()),
             timeout_ms: 2_000,
             tenant_id: "public".to_string(),
         }
+    }
+}
+
+impl HyperswitchServiceConfig {
+    /// Hyperswitch's root URL, without a trailing `/`.
+    fn root_url(&self) -> &str {
+        self.base_url.trim_end_matches('/')
+    }
+
+    /// The cards-info lookup, `GET {root}/cards/{bin}`.
+    pub fn cards_url(&self) -> String {
+        format!("{}/cards", self.root_url())
+    }
+
+    /// The GSM rule lookup, `POST {root}/gsm/get`.
+    pub fn gsm_url(&self) -> String {
+        format!("{}/gsm/get", self.root_url())
     }
 }
 
@@ -438,7 +456,7 @@ pub struct TenantConfig {
     pub hypersense: HypersenseConfig,
     pub cost_ingestion: CostIngestionConfig,
     pub volume_commitment: VolumeCommitmentConfig,
-    pub card_info_service: CardInfoServiceConfig,
+    pub hyperswitch_service: HyperswitchServiceConfig,
     /// Scoring-context TTL settings, copied from the global config.
     pub scoring_data: ScoringDataConfig,
 }
@@ -719,7 +737,7 @@ impl TenantConfig {
             hypersense: global_config.hypersense.clone(),
             cost_ingestion: global_config.cost_ingestion.clone(),
             volume_commitment: global_config.volume_commitment.clone(),
-            card_info_service: global_config.card_info_service.clone(),
+            hyperswitch_service: global_config.hyperswitch_service.clone(),
             scoring_data: global_config.scoring_data.clone(),
         }
     }
@@ -1247,11 +1265,11 @@ impl GlobalConfig {
             );
         }
 
-        self.card_info_service.api_key = secret_management_client
-            .get_secret(self.card_info_service.api_key.clone())
+        self.hyperswitch_service.api_key = secret_management_client
+            .get_secret(self.hyperswitch_service.api_key.clone())
             .await
             .change_context(error::ConfigurationError::KmsDecryptError(
-                "card_info_service_api_key",
+                "hyperswitch_service_api_key",
             ))?;
 
         self.hypersense.password = secret_management_client

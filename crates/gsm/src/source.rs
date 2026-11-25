@@ -29,6 +29,9 @@ pub struct GsmConfig {
     pub key: Option<String>,
     /// AWS region — optional when `source = "s3"`, falls back to `AWS_REGION` env var.
     pub region: Option<String>,
+    /// SaaS: look rules up in Hyperswitch's GSM API instead of loading `source` into the pod.
+    #[serde(default)]
+    pub hyperswitch_lookup: bool,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, Default)]

@@ -285,6 +285,36 @@ identity = ""
 
 Controls the outbound HTTP client used for upstream calls. Set `identity` to a PEM path if you need mTLS.
 
+### Hyperswitch service
+
+```toml
+[hyperswitch_service]
+base_url = "https://integ.hyperswitch.io/api"   # Hyperswitch's root
+api_key = ""                                     # a Hyperswitch merchant API key
+timeout_ms = 2000
+tenant_id = "public"
+```
+
+Decision Engine calls Hyperswitch as a merchant, with `api_key` and `x-tenant-id`, for:
+
+- **Card info:** `GET {base_url}/cards/{bin}` fills in a payment's card attributes from its BIN.
+- **GSM rules**, when `[gsm] hyperswitch_lookup = true`: `POST {base_url}/gsm/get`.
+
+The section was named `[card_info_service]`, and that name is still read. `base_url` must be Hyperswitch's root, not the cards endpoint it used to name (`…/api`, not `…/api/cards`). `api_key` can be a managed secret (see [Secrets Management](#secrets-management)).
+
+### GSM rules
+
+```toml
+[gsm]
+source = "bundled"                 # bundled | file | s3: rules loaded into each pod at startup
+hyperswitch_lookup = false         # true (SaaS): load no rules; look each one up in Hyperswitch
+```
+
+GSM rules turn a connector error into a decision (`retry` or `do_default`) for `/update-gateway-score`'s `gsm_info` and the GSM scoring filter.
+
+- With `hyperswitch_lookup = false`, each pod loads the rules from `source` at startup and looks them up in memory.
+- With `hyperswitch_lookup = true`, no rules are loaded, and nothing is stored on Decision Engine's side. Each update that sends `errorInfo` calls Hyperswitch's GSM table through [`[hyperswitch_service]`](#hyperswitch-service), as the card-info lookup does: the issuer key first when `cardNetwork` and `issuerErrorCode` are sent, then the connector's error code, so one or two calls. A rule changed in Hyperswitch applies to the next update. If Hyperswitch can't be reached, the update gets no `gsm_info`. `/gsm/options` returns no rules, since none are in the pod.
+
 ## Secrets Management
 
 By default, secrets in config are stored in plaintext. For production, use one of the two supported backends.

@@ -24,7 +24,7 @@
 //! gsm::init(&config.gsm).await;
 //!
 //! // Thereafter, zero-cost sync lookups from anywhere.
-//! let info = gsm::lookup(&error_info);
+//! let info = gsm::lookup("adyen", &error_info);
 //! ```
 //!
 //! # Implementing your own backing store
@@ -44,7 +44,7 @@ pub mod loader;
 pub use config::ConfigGsmStore;
 pub use error::GsmError;
 pub use interface::GsmLookup;
-pub use lookup::{get_gsm_rule, lookup_from_error_info};
+pub use lookup::{get_gsm_rule, issuer_lookup_key, lookup_from_error_info};
 pub use source::{GsmConfig, GsmSourceKind};
 pub use types::{GsmDecision, GsmErrorInfo, GsmInfo, GsmOptionRow, GsmRule};
 
@@ -95,8 +95,8 @@ mod tests {
         // No issuer code — should fall back to connector error code path
         let rule = get_gsm_rule(
             &store,
+            "adyen",
             &GsmErrorInfo {
-                connector: "adyen".to_string(),
                 flow: "Payment".to_string(),
                 sub_flow: "Authorize".to_string(),
                 error_code: Some("2".to_string()),
@@ -116,8 +116,8 @@ mod tests {
         // Use an issuer code that has no matching rule so the lookup falls back to connector code.
         let rule = get_gsm_rule(
             &store,
+            "adyen",
             &GsmErrorInfo {
-                connector: "adyen".to_string(),
                 flow: "Payment".to_string(),
                 sub_flow: "Authorize".to_string(),
                 error_code: Some("2".to_string()),

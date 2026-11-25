@@ -454,6 +454,8 @@ pub async fn store_scoring_context_without_decider(
             routingApproach: Some(routing_approach.to_string()),
             eliminationEnabled: dreq_.elimination_enabled.unwrap_or_default(),
             udfs: Some(decider_params.dpOrder.udfs.clone()),
+            // Kept for smart retry's candidates on a later failed update.
+            eligibleConnectors: decider_params.dpEnforceGatewayList.clone(),
             ..scoring_data
         },
     )
@@ -1010,6 +1012,8 @@ pub async fn run_decider_flow(
             eliminationEnabled: eliminationEnabled.unwrap_or_default(),
             is_legacy_decider_flow,
             udfs: Some(deciderParams.dpOrder.udfs.clone()),
+            // Kept for smart retry's candidates on a later failed update.
+            eligibleConnectors: deciderParams.dpEnforceGatewayList.clone(),
             ..decider_flow.writer.gateway_scoring_data.clone()
         },
     )

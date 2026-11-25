@@ -70,7 +70,48 @@ erroring. Note in particular that latency goes in `txnLatency.gatewayLatency`, n
 ```
 
 When `errorInfo` is supplied in the request and matches a gateway status map rule, the response
-also carries a `gsm_info` object describing the lookup result.
+also carries a `gsm_info` object describing the lookup result. The rule is matched on the connector
+name, so `gateway` may carry its merchant connector id (`checkout:mca_cko` matches rules for `checkout`).
+The connector comes from `gateway`, so `errorInfo` does not repeat it; a `connector` field there is ignored.
+
+```json
+"errorInfo": {
+  "flow": "Payment",
+  "subFlow": "Authorize",
+  "errorCode": "20068",
+  "errorMessage": "Response received too late",
+  "issuerErrorCode": null,
+  "cardNetwork": null
+}
+```
+
+When `gsm_info.decision` is `retry`, `gsm_info.retryConnectors` lists the connectors to retry the
+payment on, best current success rate first: those `/decide` found eligible for this payment, without
+the one that just failed or any already reported for it. Entries are `connector:merchant_connector_id`,
+the identifiers `/decide` returns; report the retry attempt with that exact `gateway` and
+`isSmartRetry: true`. It is `[]` when every eligible connector has been tried, and `null` for `do_default`.
+
+```json
+{
+  "message": "Gateway score updated successfully",
+  "merchant_id": "merchant_demo",
+  "gateway": "checkout:mca_cko",
+  "payment_id": "pay_sr_001",
+  "gsm_info": {
+    "decision": "retry",
+    "stepUpPossible": false,
+    "clearPanPossible": false,
+    "alternateNetworkPossible": false,
+    "retryConnectors": ["worldpay:mca_wp", "adyen:mca_ad"],
+    "unifiedCode": "UE_3000",
+    "unifiedMessage": "Technical issue with PSP",
+    "errorCategory": null,
+    "standardisedCode": null,
+    "description": null,
+    "userGuidanceMessage": null
+  }
+}
+```
 
 ## Notes
 

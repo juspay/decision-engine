@@ -36,6 +36,7 @@ use crate::feedback::gateway_selection_scoring_v3 as GSSV3;
 use crate::feedback::types as FT;
 use crate::feedback::utils as Fbu;
 use crate::feedback::utils::GatewayScoringType as GST;
+use crate::gsm::{GatewayIdentifier, Gsm};
 use crate::merchant_config_util as MerchantConfig;
 use crate::redis::{feature as Cutover, types::ServiceConfigKey};
 use crate::types::card::txn_card_info::TxnCardInfo;
@@ -514,11 +515,9 @@ pub async fn check_and_update_gateway_score_(
         );
         if gsm_filter_enabled {
             // Connector must be the gateway that processed the payment.
-            let effective_error_info = crate::gsm::GsmErrorInfo {
-                connector: api_payload.gateway.clone(),
-                ..error_info.clone()
-            };
-            let gsm_lookup_result = crate::gsm::lookup(&effective_error_info);
+            let gsm_lookup_result = Gsm::source()
+                .find_rule(api_payload.gateway.connector_name(), error_info)
+                .await;
             logger::debug!(
                 action = "GSM_SCORING_FILTER_LOOKUP",
                 tag = "GSM_SCORING_FILTER_LOOKUP",
@@ -663,7 +662,7 @@ pub async fn check_and_update_gateway_score_(
 
 /// The key to read a payment's scoring context from: the merchant-keyed one, or the payment-id-only
 /// key older code stored it under, while that one has not expired.
-async fn scoring_data_redis_key(merchant_id: &str, payment_id: &str) -> String {
+pub(crate) async fn scoring_data_redis_key(merchant_id: &str, payment_id: &str) -> String {
     let key = DC::scoring_data_key(merchant_id, payment_id);
     let legacy_key = format!("{}{}", C::GATEWAY_SCORING_DATA, payment_id);
     let redis = &get_tenant_app_state().await.redis_conn;
@@ -1414,6 +1413,7 @@ mod tests {
             standardised_code: None,
             description: None,
             user_guidance_message: None,
+            retry_connectors: None,
         }
     }
 
