@@ -493,6 +493,7 @@ pub async fn check_and_update_gateway_score_(
     // GSM-based scoring filter: skip penalization for failures where the gateway
     // is healthy (user/issuer-originated errors). Gated per merchant so it can be
     // rolled back instantly without a deploy.
+    let mut gateway_not_at_fault = false;
     if let Some(error_info) = api_payload.error_info.as_ref() {
         let gsm_filter_enabled = is_feature_enabled(
             GsmBasedScoringFilterEnabledMerchant.get_key(),
@@ -539,7 +540,7 @@ pub async fn check_and_update_gateway_score_(
                         gsm_info.unified_message,
                         gsm_info.step_up_possible,
                     );
-                    return Ok("Success".to_string());
+                    gateway_not_at_fault = true;
                 }
             }
         }
@@ -595,23 +596,27 @@ pub async fn check_and_update_gateway_score_(
 
             // The context stays until its TTL, so a retry on another connector is still scored;
             // the score lock keeps a repeated update from counting twice.
-            // Call the function to check and update the gateway score
-            check_and_update_gateway_score(
-                txn_detail,
-                txn_card_info,
-                log_message,
-                enforce_failure,
-                api_payload.gateway_reference_id.clone(),
-                api_payload.txn_latency.clone(),
-                crate::analytics::AnalyticsRoute::UpdateGatewayScore,
-                crate::analytics::AnalyticsFlowContext::new(
-                    crate::analytics::ApiFlow::DynamicRouting,
-                    crate::analytics::FlowType::UpdateGatewayScoreScoreSnapshot,
-                ),
-                None,
-                Some(gateway_scoring_data),
-            )
-            .await;
+            if gateway_not_at_fault {
+                // Not scored, but locked like a scored update so a smart retry treats the gateway as tried.
+                take_score_lock(&txn_detail, &txn_card_info, enforce_failure, None).await;
+            } else {
+                check_and_update_gateway_score(
+                    txn_detail,
+                    txn_card_info,
+                    log_message,
+                    enforce_failure,
+                    api_payload.gateway_reference_id.clone(),
+                    api_payload.txn_latency.clone(),
+                    crate::analytics::AnalyticsRoute::UpdateGatewayScore,
+                    crate::analytics::AnalyticsFlowContext::new(
+                        crate::analytics::ApiFlow::DynamicRouting,
+                        crate::analytics::FlowType::UpdateGatewayScoreScoreSnapshot,
+                    ),
+                    None,
+                    Some(gateway_scoring_data),
+                )
+                .await;
+            }
 
             // Return success response
             Ok("Success".to_string())
@@ -687,26 +692,11 @@ pub async fn check_and_update_gateway_score(
     redis_comp_config: Option<RedisCompressionConfigCombined>,
     gateway_scoring_data: Option<GatewayScoringData>,
 ) -> () {
-    // Get gateway scoring type
-    let gateway_scoring_type =
-        get_gateway_scoring_type(txn_detail.clone(), txn_card_info.clone(), enforce_failure).await;
-
     let gateway_in_string = txn_detail.gateway.clone().unwrap_or_default();
-
-    let merchant_id = get_m_id(txn_detail.merchantId.clone());
-    let update_score_lock_key = update_gateway_score_lock(
-        gateway_scoring_type.clone(),
-        &merchant_id,
-        &txn_detail.txnUuid,
-        &gateway_in_string,
-    );
-    // The lock lasts as long as the context, so a repeat is dropped for as long as it could score.
-    let lock_key_ttl =
-        crate::decider::gatewaydecider::flow_new::scoring_data_ttl_secs(&merchant_id).await;
-
-    let should_compute_gw_score = check_and_send_should_update_gateway_score(
-        update_score_lock_key,
-        lock_key_ttl,
+    let (gateway_scoring_type, should_compute_gw_score) = take_score_lock(
+        &txn_detail,
+        &txn_card_info,
+        enforce_failure,
         redis_comp_config.clone(),
     )
     .await;
@@ -744,6 +734,34 @@ pub async fn check_and_update_gateway_score(
             gateway_in_string,
         );
     }
+}
+
+/// Takes the score lock for this update's kind, payment and gateway; `false` when an earlier update took it.
+async fn take_score_lock(
+    txn_detail: &TxnDetail,
+    txn_card_info: &TxnCardInfo,
+    enforce_failure: bool,
+    redis_comp_config: Option<RedisCompressionConfigCombined>,
+) -> (GatewayScoringType, bool) {
+    let gateway_scoring_type =
+        get_gateway_scoring_type(txn_detail.clone(), txn_card_info.clone(), enforce_failure).await;
+    let merchant_id = get_m_id(txn_detail.merchantId.clone());
+    let update_score_lock_key = update_gateway_score_lock(
+        gateway_scoring_type.clone(),
+        &merchant_id,
+        &txn_detail.txnUuid,
+        &txn_detail.gateway.clone().unwrap_or_default(),
+    );
+    // The lock lasts as long as the context, so a repeat is dropped for as long as it could score.
+    let lock_key_ttl =
+        crate::decider::gatewaydecider::flow_new::scoring_data_ttl_secs(&merchant_id).await;
+    let taken = check_and_send_should_update_gateway_score(
+        update_score_lock_key,
+        lock_key_ttl,
+        redis_comp_config,
+    )
+    .await;
+    (gateway_scoring_type, taken)
 }
 
 // Original Haskell function: updateGatewayScore

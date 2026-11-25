@@ -423,10 +423,11 @@ async fn write_gateway_scoring_data(txn_uuid: &str, data: &T::GatewayScoringData
 
 /// Saves the scoring context for a payment routed without the decider, such as one decided by a
 /// hybrid call's rule output, so its outcome still updates SR scores. `routing_approach` is
-/// recorded as how the payment was routed.
+/// recorded as how the payment was routed, and `eligible_connectors` as its smart-retry candidates.
 pub async fn store_scoring_context_without_decider(
     dreq_: &T::DomainDeciderRequestForApiCallV2,
     routing_approach: &str,
+    eligible_connectors: Option<Vec<String>>,
 ) -> Result<(), T::ErrorResponse> {
     let decider_params = prepare_decider_params(dreq_).await?;
     let mut decider_state = T::initial_decider_state(
@@ -455,7 +456,7 @@ pub async fn store_scoring_context_without_decider(
             eliminationEnabled: dreq_.elimination_enabled.unwrap_or_default(),
             udfs: Some(decider_params.dpOrder.udfs.clone()),
             // Kept for smart retry's candidates on a later failed update.
-            eligibleConnectors: decider_params.dpEnforceGatewayList.clone(),
+            eligibleConnectors: eligible_connectors,
             ..scoring_data
         },
     )
@@ -515,6 +516,8 @@ pub async fn run_decider_flow(
             .map_or("None".to_string(), |pgw| pgw.to_string())
     );
 
+    // The connectors a smart retry may use: the request's, narrowed below by an enforced priority rule.
+    let mut eligible_connectors = deciderParams.dpEnforceGatewayList.clone();
     let dResult = match (
         preferredGateway.clone(),
         deciderParams.dpMerchantPrefs.dynamicSwitchingEnabled,
@@ -626,6 +629,7 @@ pub async fn run_decider_flow(
                         filterName: "filterEnforcement".to_string(),
                         gateways: res.clone(),
                     });
+                eligible_connectors = Some(res.clone());
                 (res, priorityLogicOutput)
             } else {
                 (functionalGateways.clone(), gwPLogic)
@@ -1013,7 +1017,7 @@ pub async fn run_decider_flow(
             is_legacy_decider_flow,
             udfs: Some(deciderParams.dpOrder.udfs.clone()),
             // Kept for smart retry's candidates on a later failed update.
-            eligibleConnectors: deciderParams.dpEnforceGatewayList.clone(),
+            eligibleConnectors: eligible_connectors,
             ..decider_flow.writer.gateway_scoring_data.clone()
         },
     )
