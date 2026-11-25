@@ -58,7 +58,7 @@
 //!
 //! [`report_generated`]: https://www.checkout.com/docs/developer-resources/event-notifications/event-types/report_generated
 
-use super::common::{http_client, to_float};
+use super::common::{http_client, lenient_string, parse_notification_json, to_float};
 use crate::cost_ingestion::card_network::network_key;
 use std::collections::{HashMap, HashSet};
 
@@ -69,7 +69,6 @@ use chrono::NaiveDate;
 use masking::{PeekInterface, Secret};
 use ring::hmac;
 use serde::Deserialize;
-use serde_json::Value;
 
 use crate::cost_ingestion::connectors::csv_reader;
 use crate::cost_ingestion::source::SettlementReportSource;
@@ -244,10 +243,7 @@ impl SettlementReportSource for CheckoutReportSource {
 
         let event = parse_event(raw_body)?;
 
-        let event_type = event
-            .get("type")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
+        let event_type = event.event_type.as_deref().unwrap_or_default();
         if event_type != REPORT_GENERATED_EVENT {
             return Err(IngestError::MalformedNotification(format!(
                 "unexpected event type '{event_type}', expected {REPORT_GENERATED_EVENT}"
@@ -255,16 +251,14 @@ impl SettlementReportSource for CheckoutReportSource {
         }
 
         let data = event
-            .get("data")
+            .data
+            .as_ref()
             .ok_or_else(|| IngestError::MalformedNotification("missing data".to_string()))?;
 
         // Only the Financial Actions report matches this connector's parser; any other scheduled
         // report shares the webhook but not the columns, so reject it rather than enqueue a job the
         // worker could only fail to parse.
-        let report_type = data
-            .get("report_type")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
+        let report_type = data.report_type.as_deref().unwrap_or_default();
         if !is_financial_actions_report(report_type) {
             return Err(IngestError::MalformedNotification(format!(
                 "unsupported report_type '{report_type}' (checkout connector ingests Financial Actions only)"
@@ -272,11 +266,7 @@ impl SettlementReportSource for CheckoutReportSource {
         }
 
         // `report_id` (`rpt_…`) is the download handle passed back to `download_report`.
-        let report_ref = data
-            .get("report_id")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
+        let report_ref = data.report_id.clone().unwrap_or_default();
         if report_ref.is_empty() {
             return Err(IngestError::MalformedNotification(
                 "missing data.report_id".to_string(),
@@ -285,15 +275,14 @@ impl SettlementReportSource for CheckoutReportSource {
 
         // The event id (`evt_…`) is the queue's replay-idempotency key; fall back to the report id.
         let notification_id = event
-            .get("id")
-            .and_then(Value::as_str)
+            .id
+            .clone()
             .filter(|s| !s.is_empty())
-            .unwrap_or(&report_ref)
-            .to_string();
+            .unwrap_or_else(|| report_ref.clone());
 
         let report_date = event
-            .get("created_on")
-            .and_then(Value::as_str)
+            .created_on
+            .as_deref()
             .and_then(|d| d.get(0..10))
             .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
 
@@ -528,29 +517,53 @@ impl SettlementReportSource for CheckoutReportSource {
     }
 }
 
-/// Parse the webhook body as JSON, or a typed error.
-fn parse_event(raw_body: &[u8]) -> Result<Value, IngestError> {
-    serde_json::from_slice(raw_body).map_err(|e| {
-        IngestError::MalformedNotification(format!("checkout webhook body is not JSON: {e}"))
-    })
+/// The webhook event fields this connector reads; everything else in the payload is skipped while
+/// parsing.
+#[derive(Debug, Deserialize)]
+struct WebhookEvent {
+    #[serde(default, deserialize_with = "lenient_string")]
+    id: Option<String>,
+    #[serde(rename = "type", default, deserialize_with = "lenient_string")]
+    event_type: Option<String>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    created_on: Option<String>,
+    #[serde(default)]
+    data: Option<EventData>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EventData {
+    #[serde(default, deserialize_with = "lenient_string")]
+    report_type: Option<String>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    report_id: Option<String>,
+    #[serde(default)]
+    account: Option<EventAccount>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EventAccount {
+    #[serde(default, deserialize_with = "lenient_string")]
+    entity_id: Option<String>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    client_id: Option<String>,
+}
+
+/// Parse the webhook body into a [`WebhookEvent`], or a typed error.
+fn parse_event(raw_body: &[u8]) -> Result<WebhookEvent, IngestError> {
+    parse_notification_json(raw_body)
 }
 
 /// The Checkout account the report relates to: the entity id (`ent_…`), falling back to the client
 /// id (`cli_…`). This is the value stored as the credential `account`, so the webhook handler can
 /// load the right signing key and merchant from the *unverified* body.
-fn account_id(event: &Value) -> Option<String> {
-    let account = event.get("data")?.get("account")?;
-    let id = account
-        .get("entity_id")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .or_else(|| {
-            account
-                .get("client_id")
-                .and_then(Value::as_str)
-                .filter(|s| !s.is_empty())
-        })?;
-    Some(id.to_string())
+fn account_id(event: &WebhookEvent) -> Option<String> {
+    let account = event.data.as_ref()?.account.as_ref()?;
+    [&account.entity_id, &account.client_id]
+        .into_iter()
+        .flatten()
+        .find(|s| !s.is_empty())
+        .cloned()
 }
 
 /// Whether `report_type` is one of the Financial Actions reports this connector's parser handles
@@ -668,6 +681,48 @@ pay_3,Authorization,Authorization Fixed Fee,VISA,Credit,GB,GBP,-0.01,2026-07-09T
 pay_3,Authorization,Scheme Fixed Fee,VISA,Credit,GB,GBP,-0.003,2026-07-09T11:00:00.000\n\
 pay_4,Partial Capture,Partial Capture,AMEX,Credit,GB,GBP,30.00,2026-07-09T12:00:00.000\n\
 pay_4,Partial Capture,Partial Capture,AMEX,Credit,GB,GBP,20.00,2026-07-09T12:00:00.000\n";
+
+    #[test]
+    fn the_account_prefers_the_entity_id_over_the_client_id() {
+        let source = CheckoutReportSource;
+        let entity = br#"{"type":"report_generated","data":{"account":{"entity_id":"ent_1","client_id":"cli_1"},"extra":{"a":[1,2]}}}"#;
+        assert_eq!(source.peek_account(entity).expect("account"), "ent_1");
+        let client = br#"{"data":{"account":{"entity_id":"","client_id":"cli_1"}}}"#;
+        assert_eq!(source.peek_account(client).expect("account"), "cli_1");
+        let neither = br#"{"data":{"account":{"entity_id":7}}}"#;
+        assert!(source.peek_account(neither).is_err());
+        assert!(source.peek_account(b"not json").is_err());
+    }
+
+    #[test]
+    fn an_oversized_body_is_refused_before_parsing() {
+        let pad = "x".repeat(crate::cost_ingestion::source::MAX_NOTIFICATION_BYTES);
+        let body = format!(r#"{{"data":{{"account":{{"entity_id":"ent_1"}}}},"pad":"{pad}"}}"#);
+        assert!(matches!(
+            CheckoutReportSource.peek_account(body.as_bytes()),
+            Err(IngestError::MalformedNotification(_))
+        ));
+    }
+
+    #[test]
+    fn a_signed_report_event_is_accepted() {
+        let body = br#"{"id":"evt_1","type":"report_generated","created_on":"2026-01-02T03:04:05Z","data":{"report_id":"rpt_1","report_type":"FinancialActions","account":{"entity_id":"ent_1"}}}"#;
+        let key = hmac::Key::new(hmac::HMAC_SHA256, b"secret");
+        let sig: String = hmac::sign(&key, body)
+            .as_ref()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let mut headers = HeaderMap::new();
+        headers.insert("cko-signature", sig.parse().expect("header"));
+        let note = CheckoutReportSource
+            .verify_and_parse_notification(&headers, body, &Secret::new("secret".to_string()))
+            .expect("accepted");
+        assert_eq!(note.notification_id, "evt_1");
+        assert_eq!(note.report_ref, "rpt_1");
+        assert_eq!(note.account, "ent_1");
+        assert_eq!(note.report_date, NaiveDate::from_ymd_opt(2026, 1, 2));
+    }
 
     fn parse() -> Vec<SettledFeeRow> {
         CheckoutReportSource::new()

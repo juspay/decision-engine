@@ -52,6 +52,7 @@ curl --location "$BASE_URL/auth/logout" \
 ## Notes
 
 - Clear local dashboard session state after a successful logout.
+- A `500` (`Storage error`) means the session could not be revoked and the token still works. Retry the logout rather than treating the user as signed out.
 - API keys are not affected by dashboard logout.
 
 ## Related

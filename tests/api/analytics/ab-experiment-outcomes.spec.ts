@@ -85,7 +85,8 @@ async function enableExperiment(api: ApiClient, merchantId: string, data: Record
     metadata: {},
     algorithm: {
       type: 'ab_test',
-      data: { variant_split_pct: 49, min_sample_size: 1, guardrail_threshold_pp: 100, ...data },
+      // A stored target large enough that the experiment keeps running; results pass their own.
+      data: { variant_split_pct: 49, min_sample_size: 1000, guardrail_threshold_pp: 100, ...data },
     },
   })
   expect(experiment.status, JSON.stringify(experiment.body)).toBe(200)

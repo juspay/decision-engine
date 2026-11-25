@@ -1,4 +1,5 @@
 import { test, expect, factory } from '../../fixtures/test'
+import { allowRedisSet, refuseRedisSet } from '../../helpers/redis'
 
 /**
  * The session lifecycle beyond signup/login (which auth.spec.ts covers): logout, the merchant list and
@@ -14,6 +15,10 @@ import { test, expect, factory } from '../../fixtures/test'
 const VALID_PASSWORD = 'Password123!'
 
 test.describe('Session lifecycle (API)', () => {
+  // One test makes Redis refuse logout's denylist write for a moment; run in order so the other
+  // logouts here never land inside that window.
+  test.describe.configure({ mode: 'default' })
+
   test('logout succeeds and is idempotent for the same token', async ({ api, merchant }) => {
     const first = await api.raw('POST', '/auth/logout', { failOnStatusCode: false })
     expect(first.status).toBe(200)
@@ -23,6 +28,27 @@ test.describe('Session lifecycle (API)', () => {
     // repeat logout with the same token still succeeds rather than 401ing.
     const second = await api.raw('POST', '/auth/logout', { failOnStatusCode: false })
     expect(second.status).toBe(200)
+  })
+
+  test('logout that could not revoke the session says so, and a retry revokes it', async ({ api, merchant }) => {
+    // Undoes a refusal left behind by an aborted run.
+    await allowRedisSet()
+    // Logout revokes a session by SETting its jti under `jwt_revoked:`; refusing just that write is
+    // the outage logout must not hide, and leaves every other request working.
+    await refuseRedisSet('jwt_revoked:')
+    let failed
+    try {
+      failed = await api.raw('POST', '/auth/logout', { failOnStatusCode: false })
+    } finally {
+      await allowRedisSet()
+    }
+    expect(failed.status).toBe(500)
+    expect(failed.body.message).toBe('Storage error')
+    // Not revoked, so the session still works, as the failure told the client.
+    expect((await api.raw('GET', '/auth/me', { failOnStatusCode: false })).status).toBe(200)
+
+    expect((await api.raw('POST', '/auth/logout', { failOnStatusCode: false })).status).toBe(200)
+    expect((await api.raw('GET', '/auth/me', { failOnStatusCode: false })).status).toBe(401)
   })
 
   test('logout without a token is rejected', async ({ api }) => {

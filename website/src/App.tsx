@@ -56,7 +56,7 @@ let hsSsoExchange: Promise<ExchangeResponse | null> | null = null
  * still offers that section.
  */
 function UnknownRoute() {
-  if (!isEmbedded()) return <Navigate to="." replace />
+  if (!isEmbedded()) return <Navigate to="/" replace />
   return (
     <div className="flex min-h-[320px] items-center justify-center px-4">
       <div className="flex max-w-sm flex-col items-center gap-3 rounded-2xl border border-slate-200 bg-white px-6 py-6 text-center shadow-[0_16px_40px_-30px_rgba(15,23,42,0.35)] dark:border-[#1d1d23] dark:bg-[#111318] dark:shadow-none">

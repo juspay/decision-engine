@@ -92,3 +92,77 @@ export async function redisKeys(pattern: string): Promise<string[]> {
   } while (cursor !== '0')
   return keys.sort()
 }
+
+/** `PFCOUNT` of the HyperLogLog at `key`: 0 when it doesn't exist. */
+export async function redisPfcount(key: string): Promise<number> {
+  return (await command(['PFCOUNT', key])) as number
+}
+
+/** Seconds until the key at `key` expires: -1 without an expiry, -2 when it doesn't exist. */
+export async function redisTtl(key: string): Promise<number> {
+  return (await command(['TTL', key])) as number
+}
+
+/** Length of the list at `key`: 0 when it doesn't exist. */
+export async function redisListLength(key: string): Promise<number> {
+  return (await command(['LLEN', key])) as number
+}
+
+/**
+ * Refuses SET on keys starting with `prefix` (every other key still takes it) until `allowRedisSet`,
+ * to exercise how the engine handles a write Redis rejects without failing unrelated requests.
+ *
+ * ACL key patterns only allow, so SET is withdrawn and granted back by a selector whose globs match
+ * every key that does not start with `prefix`: one that diverges at each position, or is shorter.
+ */
+export async function refuseRedisSet(prefix: string): Promise<void> {
+  if (/[*?[\]\\^-]/.test(prefix)) throw new Error(`prefix ${prefix} has glob characters`)
+  const patterns: string[] = []
+  for (let i = 0; i < prefix.length; i++) {
+    patterns.push(`~${prefix.slice(0, i)}[^${prefix[i]}]*`)
+    if (i > 0) patterns.push(`~${prefix.slice(0, i)}`)
+  }
+  await command(['ACL', 'SETUSER', 'default', '-set', `(+set ${patterns.join(' ')})`])
+}
+
+/** Undoes `refuseRedisSet`; harmless when nothing was refused. */
+export async function allowRedisSet(): Promise<void> {
+  await command(['ACL', 'SETUSER', 'default', '+set', 'clearselectors'])
+}
+
+/**
+ * Distinct payments the A/B guardrail counted per arm in an experiment's current observation
+ * period, keyed `<arm>_txns` and `<arm>_succ`. Exact for a handful of payments; from a few dozen,
+ * HyperLogLog can read one or two low, so assert those with a margin.
+ */
+export async function abGuardrailCounts(merchantId: string, experimentId: string): Promise<Record<string, number>> {
+  const counts: Record<string, number> = {}
+  for (const key of await redisKeys(`ab_guardrail_{${merchantId}_${experimentId}}_*`)) {
+    // The routed-payment sets aren't counts.
+    if (key.endsWith('_routed')) continue
+    // ab_guardrail_{m_e}_<arm>_<txns|succ>
+    counts[key.split('}_')[1]] = await redisPfcount(key)
+  }
+  return counts
+}
+
+/** How many connections are subscribed to `channel`. */
+export async function redisSubscribers(channel: string): Promise<number> {
+  const [, count] = (await command(['PUBSUB', 'NUMSUB', channel])) as [string, number]
+  return count
+}
+
+/**
+ * Closes every pub/sub connection and refuses SUBSCRIBE until `restorePubSub`, so whatever is
+ * published meanwhile reaches no instance: the gap a Redis failover leaves. Instances stay
+ * connected for everything else.
+ */
+export async function cutPubSub(): Promise<void> {
+  await command(['ACL', 'SETUSER', 'default', '-subscribe'])
+  await command(['CLIENT', 'KILL', 'TYPE', 'pubsub'])
+}
+
+/** Allows SUBSCRIBE again after `cutPubSub`; harmless when it was never cut. */
+export async function restorePubSub(): Promise<void> {
+  await command(['ACL', 'SETUSER', 'default', '+subscribe'])
+}

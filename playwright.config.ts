@@ -21,6 +21,8 @@ import { SUPER_ADMIN_EMAIL } from './tests/fixtures/super-admin'
  */
 
 const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:8080'
+// A second instance on the same datastores, for the specs that check behaviour across instances.
+const API_BASE_URL_B = process.env.API_BASE_URL_B || 'http://localhost:8099'
 const UI_BASE_URL = process.env.UI_BASE_URL || 'http://localhost:5173'
 
 /**
@@ -45,6 +47,23 @@ const webServer = process.env.PW_NO_WEBSERVER
         // Merged over process.env, so CI's other DECISION_ENGINE__ overrides still apply.
         env: {
           ...(process.env as Record<string, string>),
+          DECISION_ENGINE__USER_AUTH__SUPER_ADMIN_EMAILS: SUPER_ADMIN_EMAIL,
+        },
+      },
+      {
+        // The second instance, for tests/api/routing/multi-pod.spec.ts. Like a production pod that
+        // doesn't own them, it runs no singleton background workers.
+        command: './target/debug/open_router',
+        url: `${API_BASE_URL_B}/health`,
+        reuseExistingServer: !process.env.CI,
+        timeout: 180_000,
+        stdout: 'pipe' as const,
+        stderr: 'pipe' as const,
+        env: {
+          ...(process.env as Record<string, string>),
+          DECISION_ENGINE__SERVER__PORT: new URL(API_BASE_URL_B).port,
+          DECISION_ENGINE__VOLUME_COMMITMENT__ENABLED: 'false',
+          DECISION_ENGINE__COST_INGESTION__WORKER_ENABLED: 'false',
           DECISION_ENGINE__USER_AUTH__SUPER_ADMIN_EMAILS: SUPER_ADMIN_EMAIL,
         },
       },

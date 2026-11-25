@@ -599,7 +599,11 @@ fn merchant_routes() -> axum::Router<Arc<GlobalAppState>> {
             metered!(post, routes::hybrid_routing::hybrid_routing_evaluate)
                 .layer(middleware::from_fn(custom_middleware::routing_deadline)),
         )
-        .route("/decide", metered!(post, routes::decide::decide))
+        .route(
+            "/decide",
+            metered!(post, routes::decide::decide)
+                .layer(middleware::from_fn(custom_middleware::routing_deadline)),
+        )
         .route(
             "/update-gateway-score",
             metered!(post, routes::update_gateway_score::update_gateway_score)
@@ -688,7 +692,12 @@ fn public_routes() -> axum::Router<Arc<GlobalAppState>> {
     axum::Router::new()
         .route(
             "/webhooks/settlement/:merchant_id/:connector",
-            metered!(post, routes::settlement_webhook::settlement_webhook),
+            // Connector notifications are small; refuse a larger body before it is buffered.
+            metered!(post, routes::settlement_webhook::settlement_webhook).layer(
+                axum::extract::DefaultBodyLimit::max(
+                    crate::cost_ingestion::source::MAX_NOTIFICATION_BYTES,
+                ),
+            ),
         )
         .route("/auth/signup", metered!(post, routes::user_auth::signup))
         .route("/auth/login", metered!(post, routes::user_auth::login))

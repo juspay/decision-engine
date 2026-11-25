@@ -172,6 +172,10 @@ fn is_zero_pct(pct: &u8) -> bool {
     *pct == 0
 }
 
+/// The largest `min_sample_size` an experiment can have, which bounds the payments it routes (at
+/// most twice the target, per comparison, while outcomes catch up).
+pub const MAX_SAMPLE_SIZE: u32 = 500_000;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ABTestData {
     /// Layered control arm. When present it defines control and the single-strategy control
@@ -199,10 +203,14 @@ pub struct ABTestData {
     /// left out of the stored definition, for multi-variant experiments.
     #[serde(default, skip_serializing_if = "is_zero_pct")]
     pub variant_split_pct: u8,
-    /// Minimum transactions to collect before reporting a significance verdict.
+    /// The experiment's size: resolved payments (with an outcome) each comparison, control plus a
+    /// variant, collects. Its results report a significance verdict at this many, and the
+    /// experiment then completes and the active rule routes every payment again. It also completes
+    /// once a comparison has routed twice this many, should outcomes stop arriving. At most
+    /// [`MAX_SAMPLE_SIZE`].
     pub min_sample_size: u32,
-    /// Stop a variant for new payments when its auth rate drops more than this many pp below
-    /// control, once a tenth of the sample target has resolved.
+    /// Stop a variant for new payments when its auth rate is more than this many pp below control
+    /// and the drop is statistically clear (see `ab_test::guardrail::is_breached`).
     pub guardrail_threshold_pp: f64,
     /// SR overrides for a single-strategy `sr_routing` variant arm.
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -14,6 +14,8 @@ host = "127.0.0.1"
 port = 8080
 shutdown_drain_delay = 5 # seconds serving with readiness down after SIGTERM/SIGINT
 shutdown_timeout = 20    # seconds in-flight requests get to finish once the listener closes
+# Local runs only. Real deployments pin it false by env and supply both secrets.
+allow_placeholder_secrets = true
 
 [limit]
 request_count = 1
@@ -109,6 +111,16 @@ tenant_id = "public"
 # go past the max, which bounds the Redis shared with other services.
 default_ttl_secs = 1800   # 30 minutes
 max_ttl_secs = 259200     # 3 days
+# Once /update-gateway-score reports a payment succeeded, its context and success lock are cut to
+# this, in seconds: no retry follows a success, and an outcome arriving out of order still scores
+# within it. 0 keeps them for their full TTL. The legacy /update-score keeps the full TTL.
+after_success_ttl_secs = 900   # 15 minutes
+
+[ab_test]
+# How long an A/B experiment's guardrail keys in Redis (its routed payments and outcome counts)
+# are kept after their last write, in seconds. Each routed payment and outcome
+# resets it, so a running experiment keeps its keys; they go 30 days after it stops getting traffic.
+guardrail_keys_ttl_secs = 2592000   # 30 days
 
 [cost_ingestion]
 # Drain webhook-enqueued jobs in this process. Off by default so only a dedicated ingest
@@ -1114,8 +1126,6 @@ super_admin_emails = []
 
 [admin_secret]
 secret = "test_admin"
-
-api_key_auth_enabled = true
 
 [email]
 sender_email = "noreply@example.com"

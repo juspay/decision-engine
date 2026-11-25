@@ -1824,6 +1824,9 @@
                 }
               }
             }
+          },
+          "500": {
+            "description": "`TE_04` `Storage error`: the session could not be revoked and is still valid. Retry the logout."
           }
         }
       }

@@ -398,11 +398,14 @@ pub async fn login(
         .await
         .change_error(UserAuthError::StorageError)?;
 
-    // UserNotFound and InvalidPassword render as the same 401 in into_response, so there is no
-    // enumeration oracle. AccountInactive and EmailNotVerified stay distinct so the user knows
-    // which step to take. An unknown email returns before bcrypt runs, so response timing does
-    // differ, but separating the two needs repeated sampling and the edge rate limiter bounds
-    // that. Accepted, not a finding.
+    // UserNotFound and InvalidPassword render as the same 401 in into_response, so the response
+    // body is not an enumeration oracle. AccountInactive and EmailNotVerified stay distinct so the
+    // user knows which step to take. An unknown email returns before bcrypt runs, so response
+    // timing does differ and separating the two takes repeated sampling. By design, the control on
+    // that sampling is the Envoy rate limit fronting the deployment, not this handler — see
+    // public_routes in app.rs, which carries no in-process limiter or lockout on purpose. Accepted
+    // on that basis. A deployment that does not reproduce the edge policy has an unmetered oracle,
+    // so this is a deployment requirement rather than a property of the binary.
     let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
 
     let is_active = {
@@ -1148,12 +1151,21 @@ pub async fn logout(
         .as_secs();
     let remaining_ttl = claims.exp.saturating_sub(now) as i64;
 
+    // The token is refused only once its jti is on the denylist, so logout succeeds only if that
+    // write does; otherwise the client is told, and the session stays usable until it retries.
     if remaining_ttl > 0 {
         let deny_key = format!("{}{}", JWT_DENYLIST_PREFIX, claims.jti);
-        let _ = app_state
+        app_state
             .redis_conn
             .set_key_with_ttl(&deny_key, "1", remaining_ttl)
-            .await;
+            .await
+            .inspect_err(|error| {
+                crate::logger::error!(
+                    ?error,
+                    "Logout failed: could not add the session to the denylist"
+                );
+            })
+            .change_context(UserAuthError::StorageError)?;
     }
 
     Ok(Json(

@@ -68,25 +68,19 @@ echo ""
 echo "[ API key auth enforcement ]"
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/rule/get" \
     -H "Content-Type: application/json" -d '{}')
-if [ "$STATUS" = "401" ]; then
-    AUTH_ENFORCED=true
-    check "No credentials → 401" "401" "$STATUS"
+check "No credentials → 401" "401" "$STATUS"
 
-    STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/rule/get" \
-        -H "Content-Type: application/json" \
-        -H "x-api-key: DE_wrongkeydeadbeef00000000000000000000000000000000000000000000000" \
-        -d '{}')
-    check "Wrong API key → 401" "401" "$STATUS"
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/rule/get" \
+    -H "Content-Type: application/json" \
+    -H "x-api-key: DE_wrongkeydeadbeef00000000000000000000000000000000000000000000000" \
+    -d '{}')
+check "Wrong API key → 401" "401" "$STATUS"
 
-    STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/rule/get" \
-        -H "Content-Type: application/json" \
-        -H "x-api-key: $API_KEY" \
-        -d '{}')
-    check "Valid API key passes auth (422 = body error, not 401)" "422" "$STATUS"
-else
-    AUTH_ENFORCED=false
-    echo "  INFO  api_key_auth_enabled=false — auth rejection checks skipped"
-fi
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/rule/get" \
+    -H "Content-Type: application/json" \
+    -H "x-api-key: $API_KEY" \
+    -d '{}')
+check "Valid API key passes auth (422 = body error, not 401)" "422" "$STATUS"
 
 # ── 5. Create additional API key ───────────────────────
 echo ""
@@ -139,15 +133,11 @@ if [ -n "$NEW_KEY_ID" ]; then
     echo ""
     echo "[ Revoked API key is rejected ]"
     sleep 1
-    if [ "$AUTH_ENFORCED" = "true" ]; then
-        STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/rule/get" \
-            -H "Content-Type: application/json" \
-            -H "x-api-key: $NEW_KEY" \
-            -d '{}')
-        check "Revoked API key → 401" "401" "$STATUS"
-    else
-        echo "  INFO  Auth not enforced — skipping revoked key rejection check"
-    fi
+    STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/rule/get" \
+        -H "Content-Type: application/json" \
+        -H "x-api-key: $NEW_KEY" \
+        -d '{}')
+    check "Revoked API key → 401" "401" "$STATUS"
 
     echo ""
     echo "[ List reflects revocation ]"
@@ -346,15 +336,11 @@ if [ -n "$JWT_TOKEN" ]; then
         -d '{}')
     check "Valid JWT passes auth (422 = body error, not 401)" "422" "$STATUS"
 
-    if [ "$AUTH_ENFORCED" = "true" ]; then
-        STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/rule/get" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer invalidtoken.abc.def" \
-            -d '{}')
-        check "Invalid JWT → 401" "401" "$STATUS"
-    else
-        echo "  INFO  Auth not enforced — skipping invalid JWT check"
-    fi
+    STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/rule/get" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer invalidtoken.abc.def" \
+        -d '{}')
+    check "Invalid JWT → 401" "401" "$STATUS"
 
     # ── 17. /auth/me ──────────────────────────────────
     echo ""
@@ -394,15 +380,11 @@ if [ -n "$JWT_TOKEN" ]; then
     echo ""
     echo "[ Revoked JWT rejected ]"
     sleep 1
-    if [ "$AUTH_ENFORCED" = "true" ]; then
-        STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/rule/get" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $JWT_TOKEN" \
-            -d '{}')
-        check "Logged-out JWT → 401" "401" "$STATUS"
-    else
-        echo "  INFO  Auth not enforced — skipping revoked JWT check"
-    fi
+    STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/rule/get" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $JWT_TOKEN" \
+        -d '{}')
+    check "Logged-out JWT → 401" "401" "$STATUS"
 
     # ── 20. Re-login after logout ─────────────────────
     echo ""

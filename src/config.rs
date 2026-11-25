@@ -49,8 +49,6 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
     pub compression_filepath: Option<CompressionFilepath>,
-    #[serde(default = "default_true")]
-    pub api_key_auth_enabled: bool,
     pub user_auth: UserAuthConfig,
     pub admin_secret: AdminSecretConfig,
     #[serde(default)]
@@ -73,22 +71,48 @@ pub struct GlobalConfig {
     /// Scoring-context TTL settings; defaults apply when the section is missing.
     #[serde(default)]
     pub scoring_data: ScoringDataConfig,
+    /// A/B experiment settings; defaults apply when the section is missing.
+    #[serde(default)]
+    pub ab_test: AbTestSettings,
 }
 
-/// `[scoring_data]`: the default and max TTL of the scoring context `/decide` stores in Redis.
+/// `[ab_test]`: Redis retention of the A/B guardrail's state.
+#[derive(Clone, serde::Deserialize, Debug)]
+#[serde(default)]
+pub struct AbTestSettings {
+    /// How long an experiment's guardrail keys (its routed payments and outcome counts) are kept
+    /// after their last write; each write resets it.
+    pub guardrail_keys_ttl_secs: i64,
+}
+
+// 30 days when the config leaves it out.
+impl Default for AbTestSettings {
+    fn default() -> Self {
+        Self {
+            guardrail_keys_ttl_secs: 30 * 24 * 60 * 60,
+        }
+    }
+}
+
+/// `[scoring_data]`: the default and max TTL of the scoring context `/decide` stores in Redis, and
+/// how long it is kept once the payment succeeds.
 #[derive(Clone, serde::Deserialize, Debug)]
 #[serde(default)]
 pub struct ScoringDataConfig {
     pub default_ttl_secs: i64,
     pub max_ttl_secs: i64,
+    /// Seconds a payment's context and its success lock stay once `/update-gateway-score`
+    /// reports it succeeded; 0 keeps them for their full TTL.
+    pub after_success_ttl_secs: i64,
 }
 
-// 30 minutes by default, 3 days at most, when the config leaves them out.
+// 30 minutes by default, 3 days at most, 15 minutes after a success, when the config leaves them out.
 impl Default for ScoringDataConfig {
     fn default() -> Self {
         Self {
             default_ttl_secs: 1_800,
             max_ttl_secs: 259_200,
+            after_success_ttl_secs: 900,
         }
     }
 }
@@ -100,6 +124,11 @@ impl ScoringDataConfig {
             .filter(|ttl| *ttl > 0)
             .unwrap_or(self.default_ttl_secs)
             .min(self.max_ttl_secs)
+    }
+
+    /// How long a succeeded payment's context is kept, or None to keep it for its full TTL.
+    pub fn after_success_ttl_secs(&self) -> Option<i64> {
+        (self.after_success_ttl_secs > 0).then_some(self.after_success_ttl_secs)
     }
 }
 
@@ -276,9 +305,9 @@ fn default_hs_redirect_jwt_expiry() -> u64 {
     1200 // 20 minutes
 }
 
-// Placeholder for local and docker runs. The merchant overrides it when self-hosting, so startup
-// warns rather than refusing to boot. Accepted risk, not a finding.
+// Placeholders for local and docker runs. Booting with either needs allow_placeholder_secrets.
 const DEFAULT_ADMIN_SECRET: &str = "test_admin";
+const DEFAULT_JWT_SECRET: &str = "change_me_in_production_use_32chars!!";
 
 #[derive(Clone, serde::Deserialize, Debug)]
 pub struct AdminSecretConfig {
@@ -300,12 +329,17 @@ impl AdminSecretConfig {
     }
 }
 
+impl UserAuthConfig {
+    pub fn is_default_jwt_secret(&self) -> bool {
+        self.jwt_secret.peek() == DEFAULT_JWT_SECRET
+    }
+}
+
 impl Default for UserAuthConfig {
     fn default() -> Self {
         Self {
-            // Same placeholder contract as DEFAULT_ADMIN_SECRET above. Accepted risk, not a
-            // finding.
-            jwt_secret: "change_me_in_production_use_32chars!!".to_string().into(),
+            // Same placeholder contract as DEFAULT_ADMIN_SECRET.
+            jwt_secret: DEFAULT_JWT_SECRET.to_string().into(),
             jwt_expiry_seconds: default_jwt_expiry(),
             hs_redirect_jwt_expiry_seconds: default_hs_redirect_jwt_expiry(),
             email_verification_enabled: false,
@@ -459,6 +493,8 @@ pub struct TenantConfig {
     pub hyperswitch_service: HyperswitchServiceConfig,
     /// Scoring-context TTL settings, copied from the global config.
     pub scoring_data: ScoringDataConfig,
+    /// A/B experiment settings, copied from the global config.
+    pub ab_test: AbTestSettings,
 }
 
 /// Deployment-level mechanics for volume commitment routing; everything per-merchant arrives
@@ -535,6 +571,7 @@ impl Default for VolumeCommitmentConfig {
                 shutdown_timeout: Server::default_shutdown_timeout(),
                 shutdown_drain_delay: Server::default_shutdown_drain_delay(),
                 routing_request_timeout_ms: Server::default_routing_request_timeout_ms(),
+                allow_placeholder_secrets: false,
             },
             main_server_url: "http://127.0.0.1:8080".to_string(),
             tick_secs: 30,
@@ -739,6 +776,7 @@ impl TenantConfig {
             volume_commitment: global_config.volume_commitment.clone(),
             hyperswitch_service: global_config.hyperswitch_service.clone(),
             scoring_data: global_config.scoring_data.clone(),
+            ab_test: global_config.ab_test.clone(),
         }
     }
 }
@@ -803,6 +841,8 @@ pub struct Server {
     /// it is answered with `504`. Bounds how long a slow Redis or database holds a connection.
     #[serde(default = "Server::default_routing_request_timeout_ms")]
     pub routing_request_timeout_ms: u64,
+    #[serde(default)]
+    pub allow_placeholder_secrets: bool,
 }
 
 impl Server {
@@ -1307,6 +1347,26 @@ impl GlobalConfig {
 
     pub fn validate(&self) -> error_stack::Result<(), error::ConfigurationError> {
         self.secrets_management.validate()?;
+        if !self.server.allow_placeholder_secrets {
+            if self.admin_secret.is_default() {
+                return Err(error_stack::report!(
+                    error::ConfigurationError::InvalidConfigurationValueError(
+                        "admin_secret.secret is the built-in placeholder. Set a strong secret, or \
+                         set server.allow_placeholder_secrets = true for local runs"
+                            .to_string(),
+                    )
+                ));
+            }
+            if self.user_auth.is_default_jwt_secret() {
+                return Err(error_stack::report!(
+                    error::ConfigurationError::InvalidConfigurationValueError(
+                        "user_auth.jwt_secret is the built-in placeholder. Set a strong random \
+                         secret, or set server.allow_placeholder_secrets = true for local runs"
+                            .to_string(),
+                    )
+                ));
+            }
+        }
         if self.analytics.capture.details_max_bytes == 0 {
             return Err(error_stack::report!(
                 error::ConfigurationError::InvalidConfigurationValueError(
@@ -1343,6 +1403,20 @@ impl GlobalConfig {
                 )
             ));
         }
+        if self.scoring_data.after_success_ttl_secs < 0 {
+            return Err(error_stack::report!(
+                error::ConfigurationError::InvalidConfigurationValueError(
+                    "scoring_data.after_success_ttl_secs".to_string(),
+                )
+            ));
+        }
+        if self.ab_test.guardrail_keys_ttl_secs <= 0 {
+            return Err(error_stack::report!(
+                error::ConfigurationError::InvalidConfigurationValueError(
+                    "ab_test.guardrail_keys_ttl_secs".to_string(),
+                )
+            ));
+        }
         Ok(())
     }
 }
@@ -1360,6 +1434,27 @@ mod tests {
     struct TestDeser {
         #[serde(default)]
         pub secrets_management: SecretsManagementConfig,
+    }
+
+    // Only the dev config opts into the placeholders.
+    #[test]
+    fn test_placeholder_secrets_gate_startup() {
+        let mut config = GlobalConfig::new().expect("failed to parse the development config");
+        assert!(config.server.allow_placeholder_secrets);
+        assert!(config.admin_secret.is_default());
+        assert!(config.user_auth.is_default_jwt_secret());
+        config.validate().expect("the dev config should validate");
+
+        config.server.allow_placeholder_secrets = false;
+        assert!(config.validate().is_err());
+
+        config.admin_secret.secret = "a-real-admin-secret".to_string().into();
+        assert!(config.validate().is_err());
+
+        config.user_auth.jwt_secret = "a-real-jwt-secret-of-32-chars-min".to_string().into();
+        config
+            .validate()
+            .expect("real secrets should validate without the opt-out");
     }
 
     #[test]
@@ -1434,12 +1529,34 @@ mod tests {
         }
     }
 
+    // 0 keeps a succeeded payment's context for its full TTL; anything else replaces it.
+    #[test]
+    fn after_success_ttl_zero_keeps_the_full_ttl() {
+        let mut config = ScoringDataConfig::default();
+        assert_eq!(config.after_success_ttl_secs(), Some(900));
+        config.after_success_ttl_secs = 0;
+        assert_eq!(config.after_success_ttl_secs(), None);
+    }
+
+    // A negative after-success TTL is refused; 0 and any positive value start.
+    #[test]
+    fn after_success_ttl_must_not_be_negative() {
+        let mut config = GlobalConfig::new().expect("failed to parse the development config");
+        config.scoring_data.after_success_ttl_secs = -1;
+        assert!(config.validate().is_err());
+        for ttl in [0, 60, 900] {
+            config.scoring_data.after_success_ttl_secs = ttl;
+            config.validate().expect("0 or a positive TTL is allowed");
+        }
+    }
+
     // A merchant's TTL is used as is, or cut to the max when above it.
     #[test]
     fn scoring_data_ttl_is_the_merchants_capped_at_the_max() {
         let config = ScoringDataConfig {
             default_ttl_secs: 1_800,
             max_ttl_secs: 259_200,
+            ..ScoringDataConfig::default()
         };
         assert_eq!(config.ttl_secs(Some(172_800)), 172_800);
         assert_eq!(config.ttl_secs(Some(10_000_000)), 259_200);
@@ -1451,10 +1568,18 @@ mod tests {
         let config = ScoringDataConfig {
             default_ttl_secs: 3_600,
             max_ttl_secs: 7_200,
+            ..ScoringDataConfig::default()
         };
         assert_eq!(config.ttl_secs(None), 3_600);
         assert_eq!(config.ttl_secs(Some(0)), 3_600);
         assert_eq!(config.ttl_secs(Some(-5)), 3_600);
+    }
+
+    #[test]
+    fn ab_test_guardrail_keys_default_to_thirty_days() {
+        assert_eq!(AbTestSettings::default().guardrail_keys_ttl_secs, 2_592_000);
+        let parsed: AbTestSettings = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(parsed.guardrail_keys_ttl_secs, 2_592_000);
     }
 }
 

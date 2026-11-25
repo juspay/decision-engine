@@ -7,7 +7,10 @@ use fred::prelude::RedisKey;
 use fred::types::SetOptions;
 use fred::{
     clients::Transaction,
-    interfaces::{HashesInterface, KeysInterface, ListInterface, TransactionInterface},
+    interfaces::{
+        HashesInterface, HyperloglogInterface, KeysInterface, ListInterface, SetsInterface,
+        TransactionInterface,
+    },
     types::{Expiration, FromRedis, MultipleValues},
 };
 use redis_interface::{errors, types::DelReply, RedisConnectionPool, RedisConnectionWithContext};
@@ -581,12 +584,118 @@ impl RedisConnectionWrapper {
             .change_context(errors::RedisError::IncrementHashFieldFailed)
     }
 
+    /// `PFADD` `member` to each HyperLogLog in `keys` and sets each one's TTL to `ttl` seconds, in
+    /// one pipelined round trip.
+    pub async fn pfadd_all_with_ttl(
+        &self,
+        keys: &[String],
+        member: &str,
+        ttl: i64,
+    ) -> Result<(), errors::RedisError> {
+        let pipeline = self.conn.pool.next().pipeline();
+        for key in keys {
+            let _: () = pipeline
+                .pfadd(key.as_str(), member)
+                .await
+                .change_context(errors::RedisError::SetFailed)?;
+            let _: () = pipeline
+                .expire(key.as_str(), ttl)
+                .await
+                .change_context(errors::RedisError::SetFailed)?;
+        }
+        let _: Vec<fred::types::RedisValue> = pipeline
+            .all()
+            .await
+            .change_context(errors::RedisError::SetFailed)?;
+        Ok(())
+    }
+
+    /// `SADD` `member` to the set at `key` and sets its TTL to `ttl` seconds, in one pipelined
+    /// round trip.
+    pub async fn sadd_with_ttl(
+        &self,
+        key: &str,
+        member: &str,
+        ttl: i64,
+    ) -> Result<(), errors::RedisError> {
+        let pipeline = self.conn.pool.next().pipeline();
+        let _: () = pipeline
+            .sadd(key, member)
+            .await
+            .change_context(errors::RedisError::SetFailed)?;
+        let _: () = pipeline
+            .expire(key, ttl)
+            .await
+            .change_context(errors::RedisError::SetFailed)?;
+        let _: Vec<fred::types::RedisValue> = pipeline
+            .all()
+            .await
+            .change_context(errors::RedisError::SetFailed)?;
+        Ok(())
+    }
+
+    /// Whether `member` is in the set at `key`.
+    pub async fn sismember(&self, key: &str, member: &str) -> Result<bool, errors::RedisError> {
+        self.conn
+            .pool
+            .sismember(key, member)
+            .await
+            .change_context(errors::RedisError::GetFailed)
+    }
+
+    /// In one pipelined round trip: `PFCOUNT` of each HyperLogLog in `hyperloglogs`, then `SCARD`
+    /// of each set in `sets`, each in order and 0 for a key that doesn't exist.
+    pub async fn pfcount_and_scard(
+        &self,
+        hyperloglogs: &[String],
+        sets: &[String],
+    ) -> Result<(Vec<u64>, Vec<u64>), errors::RedisError> {
+        let pipeline = self.conn.pool.next().pipeline();
+        for key in hyperloglogs {
+            let _: () = pipeline
+                .pfcount(key.as_str())
+                .await
+                .change_context(errors::RedisError::GetFailed)?;
+        }
+        for key in sets {
+            let _: () = pipeline
+                .scard(key.as_str())
+                .await
+                .change_context(errors::RedisError::GetFailed)?;
+        }
+        let mut counts: Vec<u64> = pipeline
+            .all()
+            .await
+            .change_context(errors::RedisError::GetFailed)?;
+        let set_counts = counts.split_off(hyperloglogs.len().min(counts.len()));
+        Ok((counts, set_counts))
+    }
+
     pub async fn expire_key(&self, key: &str, ttl: i64) -> Result<(), errors::RedisError> {
         self.conn
             .pool
             .expire(key, ttl)
             .await
             .change_context(errors::RedisError::IncrementHashFieldFailed)
+    }
+
+    /// Lowers the key's TTL to `ttl` seconds, leaving a shorter TTL as it is (`EXPIRE … LT`,
+    /// Redis 7.0+). Returns whether the TTL changed; a missing key is left alone and returns false.
+    pub async fn shorten_expiry(&self, key: &str, ttl: i64) -> Result<bool, errors::RedisError> {
+        use fred::interfaces::ClientLike;
+        use fred::types::{ClusterHash, CustomCommand};
+
+        let changed: i64 = self
+            .conn
+            .pool
+            .next()
+            .custom(
+                CustomCommand::new_static("EXPIRE", ClusterHash::FirstKey, false),
+                vec![key.to_string(), ttl.to_string(), "LT".to_string()],
+            )
+            .await
+            .change_context(errors::RedisError::SetExpiryFailed)?;
+        Ok(changed == 1)
     }
 
     #[cfg(not(feature = "redis_compression"))]

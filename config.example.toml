@@ -12,6 +12,8 @@ otel_exporter_otlp_timeout = 10000 # milliseconds per export request (exporter d
 [server]
 host = "127.0.0.1" # The host that the server should be exposed to
 port = 3001        # The port where the server should be hosted on
+# Local runs only. Without it the placeholder secrets below fail validate() at boot.
+# allow_placeholder_secrets = false
 
 [limit]
 request_count = 1 # The requests per duration
@@ -82,8 +84,6 @@ domain_topic = "domain"
 url = "http://localhost:8123"
 database = "default"
 user = "default"
-
-api_key_auth_enabled = true
 
 [user_auth]
 jwt_secret = "change_me_in_production_use_32chars!!"

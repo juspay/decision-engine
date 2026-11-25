@@ -216,7 +216,8 @@ pub async fn decider_full_payload_hs_function(
                 None,
                 &super::ab_test::CostOutcome::default(),
                 Some(dreq_.payment_info.amount),
-            );
+            )
+            .await;
         }
         let config_name =
             crate::types::service_configuration::DebitRoutingEnabled::name(&dreq_.merchant_id);
@@ -299,7 +300,8 @@ pub async fn decider_full_payload_hs_function(
                     margin: mo.map(|m| m.margin),
                 },
                 Some(dreq_.payment_info.amount),
-            );
+            )
+            .await;
         }
 
         result

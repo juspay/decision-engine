@@ -28,7 +28,7 @@ routing_request_timeout_ms = 2000  # optional, default 2000
 
 `host` is the bind address. Use `0.0.0.0` for Docker/deployed, `127.0.0.1` for local-only.
 
-`routing_request_timeout_ms` caps how long a routing hot-path request may run before it is answered with `504`: `/decide-gateway`, `/decision_gateway`, `/routing/evaluate`, `/routing/evaluate/batch`, `/routing/hybrid` and `/update-gateway-score`. Other routes, such as report uploads and analytics, have no deadline. A score update the handler has already queued still completes after the timeout.
+`routing_request_timeout_ms` caps how long a routing hot-path request may run before it is answered with `504`: `/decide`, `/decide-gateway`, `/decision_gateway`, `/routing/evaluate`, `/routing/evaluate/batch`, `/routing/hybrid` and `/update-gateway-score`. Other routes, such as report uploads and analytics, have no deadline. A score update the handler has already queued still completes after the timeout.
 
 A handler that panics on any route is answered with `500` and logged, rather than having its connection dropped.
 
@@ -124,7 +124,11 @@ Each pod keeps merchant accounts and cost models in memory. When one pod changes
 | Cost models refitted (report upload or delete, ingest worker, invoice, connector-fee override) | Rebuild that merchant's models from ClickHouse |
 | Service config written (for example `/rule/*` SR config, `/config-sr-dimension`, merchant feature toggles, `/gateway-score/reset`, SR auto-calibration) | Drop their in-memory copy, so the next read takes the new value from Redis |
 
-Publishing is best effort. If Redis is unavailable, the write still succeeds and the other pods fall back to the existing TTLs (`service_config_ttl` for accounts and service configs, the 5-minute cost-model refresh). Deployments that share a Redis but must stay separate (for example, two environments) should each set their own `invalidation_channel`. The metric `cache_invalidations_total{kind, outcome}` counts published, failed and applied invalidations.
+Publishing is best effort. If Redis is unavailable, the write still succeeds and the other pods fall back to the existing TTLs (`service_config_ttl` for accounts and service configs, the 5-minute cost-model refresh). Deployments that share a Redis but must stay separate (for example, two environments) should each set their own `invalidation_channel`.
+
+Pub/sub keeps no backlog, so a pod misses whatever is published while its subscriber connection is down. After every reconnect, a pod subscribes again (retrying until Redis accepts) and then drops all cached service configs and merchant accounts and rebuilds its cost models, so it never acts on a change it was not told about. It does the same when a burst of messages overflows its buffer.
+
+The metric `cache_invalidations_total{kind, outcome}` counts published, failed and applied invalidations, and flushes (`kind="all"`, `outcome` `flushed_after_reconnect` or `flushed_after_lag`).
 
 ### Gateway scoring context TTL
 
@@ -134,9 +138,10 @@ Each routed payment stores a scoring context in Redis (`gateway_scoring_data_<me
 [scoring_data]
 default_ttl_secs = 1800   # a merchant without its own TTL
 max_ttl_secs = 259200     # no merchant's contexts stay longer (3 days)
+after_success_ttl_secs = 900   # a succeeded payment's context is kept this long instead (0 = full TTL)
 ```
 
-Override them per deployment with `DECISION_ENGINE__SCORING_DATA__DEFAULT_TTL_SECS` and `DECISION_ENGINE__SCORING_DATA__MAX_TTL_SECS`. Startup fails unless `0 < default_ttl_secs <= max_ttl_secs`.
+Override them per deployment with `DECISION_ENGINE__SCORING_DATA__DEFAULT_TTL_SECS`, `DECISION_ENGINE__SCORING_DATA__MAX_TTL_SECS` and `DECISION_ENGINE__SCORING_DATA__AFTER_SUCCESS_TTL_SECS`. Startup fails unless `0 < default_ttl_secs <= max_ttl_secs`, and unless `after_success_ttl_secs` is 0 or more.
 
 A merchant can have its own TTL, stored in the service config `SCORING_DATA_TTL_SECS_<merchant_id>`, which replaces the default. A TTL above `max_ttl_secs` is kept but applies as `max_ttl_secs`, so lowering the max takes effect for every merchant without editing their TTLs. Only the admin secret can set a merchant's TTL, because it sizes the Redis Decision Engine shares with other services:
 
@@ -153,7 +158,18 @@ curl http://localhost:8080/admin/merchant-account/<merchant_id>/scoring-data-ttl
 curl -X DELETE http://localhost:8080/admin/merchant-account/<merchant_id>/scoring-data-ttl -H 'x-admin-secret: <admin secret>'
 ```
 
-Each call returns `{"merchant_id", "ttl_secs", "merchant_ttl_secs", "default_ttl_secs", "max_ttl_secs"}`, where `ttl_secs` is the TTL new contexts get. A merchant that was never created gets `404`, and a `ttl_secs` below 1 gets `400`. A change reaches every pod at once and applies to payments routed after it; contexts already in Redis keep the TTL they were written with. A context stays until its TTL, whatever the outcome, so a retry of the same `payment_id` on another connector is still scored. A repeated update is scored once: the first update of each kind (reward, SR failure, pending) for a merchant's payment on a connector takes a lock that lasts as long as the context, and later ones are skipped. Each context takes about 480 bytes of Redis memory, so 48 hours of a merchant's traffic needs about 83 MB per transaction per second, plus about 150 bytes for each lock (one or two per payment).
+Each call returns `{"merchant_id", "ttl_secs", "merchant_ttl_secs", "default_ttl_secs", "max_ttl_secs"}`, where `ttl_secs` is the TTL new contexts get. A merchant that was never created gets `404`, and a `ttl_secs` below 1 gets `400`. A change reaches every pod at once and applies to payments routed after it; contexts already in Redis keep the TTL they were written with. A failed or pending payment's context stays until its TTL, so a retry of the same `payment_id` on another connector is still scored. Once `/update-gateway-score` reports the payment succeeded (any success status except `COD_INITIATED` and `TO_BE_CHARGED`, which come before authorisation, and not with `enforceDynamicRoutingFailure`), its context is cut to `after_success_ttl_secs`, or kept if its TTL is already shorter, and the lock its success takes lasts as long: no retry follows a success, an outcome that arrives out of order still scores within that window, and a later update finds no context and is skipped. This needs Redis 7.0 or later (`EXPIRE … LT`); if the context cannot be cut, it and the lock keep their full TTL. The legacy `/update-score` scores even without a context, so it relies on the lock alone and keeps the full TTL. A repeated update is scored once: the first update of each kind (reward, SR failure, pending) for a merchant's payment on a connector takes a lock that lasts as long as the context, and later ones are skipped. Locks a failure took on another connector keep their full TTL. Each context takes about 480 bytes of Redis memory, so 48 hours of a merchant's traffic needs about 83 MB per transaction per second, plus about 150 bytes for each lock (one or two per payment). With `after_success_ttl_secs` on, only failed and pending payments are held for the full TTL, so that figure scales with the share of payments that do not succeed.
+
+### A/B guardrail key retention
+
+An A/B experiment's guardrail keeps its state in Redis under `ab_guardrail_{<merchant_id>_<experiment_id>}_…`: each arm's routed payments and its outcome counts. Each key expires `guardrail_keys_ttl_secs` after its last write, and every routed payment and outcome resets it, so a running experiment keeps its keys and they go once it stops getting traffic:
+
+```toml
+[ab_test]
+guardrail_keys_ttl_secs = 2592000   # 30 days
+```
+
+Override it per deployment with `DECISION_ENGINE__AB_TEST__GUARDRAIL_KEYS_TTL_SECS`. Startup fails unless it is positive. Experiment results are read from analytics, not these keys, so their expiry never removes results.
 
 ### Database
 
@@ -168,6 +184,7 @@ password = "db_pass"
 host = "localhost"
 port = 3306
 dbname = "decision_engine_db"
+pool_size = 50  # optional, default 50
 ```
 
 **PostgreSQL:**
@@ -179,7 +196,10 @@ pg_password = "db_pass"
 pg_host = "localhost"
 pg_port = 5432
 pg_dbname = "decision_engine_db"
+pg_pool_size = 50  # optional, default 50
 ```
+
+`pool_size` / `pg_pool_size` caps the connections each pod opens to the database. A query that finds every pooled connection busy waits up to 10 seconds for one, then fails.
 
 For Docker Compose runs both are pre-wired via service names in `config/docker-configuration.toml`.
 
@@ -232,13 +252,14 @@ secret = "test_admin"
 
 Used to authenticate the `POST /merchant-account/create` endpoint (admin bootstrap). Change this in production.
 
-### API Key Auth
+### Placeholder Secrets
 
 ```toml
-api_key_auth_enabled = true
+[server]
+allow_placeholder_secrets = true
 ```
 
-Top-level flag. When `true`, protected routes accept `x-api-key` in addition to JWT bearer tokens. When `false`, the auth middleware allows **all requests through without authentication** — this effectively disables auth for every protected route. Do not set this to `false` in any environment that should enforce auth.
+Startup fails when `admin_secret.secret` or `user_auth.jwt_secret` is left at its shipped placeholder, unless this flag is on. Only `config/development.toml` and `config/docker-configuration.toml` set it — every other deployment must supply both secrets, through `DECISION_ENGINE__ADMIN_SECRET__SECRET` and `DECISION_ENGINE__USER_AUTH__JWT_SECRET` if not through the config file.
 
 ### Analytics
 
