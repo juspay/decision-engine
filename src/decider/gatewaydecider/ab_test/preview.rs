@@ -21,6 +21,9 @@ pub struct AbTestArmOutput {
     pub output: Output,
     pub evaluated_output: Vec<ConnectorInfo>,
     pub rule_name: Option<String>,
+    /// The arm's advanced-algorithm rule that matched, before the fallback replaces an unmatched
+    /// answer. `None` for other algorithm types, an arm without a rule layer, and no match.
+    pub matched_rule: Option<String>,
     pub flow_type: crate::analytics::flow::FlowType,
 }
 
@@ -49,6 +52,7 @@ pub async fn evaluate_rule_arm(
             output: Output::Priority(fallback.clone()),
             evaluated_output: fallback,
             rule_name: Some("default_fallback".to_string()),
+            matched_rule: None,
             flow_type: crate::analytics::flow::FlowType::RoutingEvaluatePriority,
         });
     };
@@ -68,6 +72,7 @@ pub async fn evaluate_rule_arm(
 
     let flow_type = crate::analytics::refine_routing_evaluate_flow_type(&arm_algorithm_data);
 
+    let mut matched_rule = None;
     let (output, evaluated_output, rule_name) = match arm_algorithm_data {
         StaticRoutingAlgorithm::Single(conn) => {
             let out_enum = Output::Single(*conn.clone());
@@ -109,6 +114,7 @@ pub async fn evaluate_rule_arm(
                     e.error_type
                 )))
             })?;
+            matched_rule = ir.rule_name.clone();
             apply_default_fallback(&mut ir, payload.fallback_output.as_deref());
 
             (ir.output, ir.evaluated_output, ir.rule_name)
@@ -129,6 +135,7 @@ pub async fn evaluate_rule_arm(
         output,
         evaluated_output,
         rule_name,
+        matched_rule,
         flow_type,
     })
 }

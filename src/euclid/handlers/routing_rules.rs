@@ -8,10 +8,10 @@ use crate::{
         pm_filter_graph,
         types::{
             ActivateRoutingConfigRequest, AlgorithmType, Context, DeactivateRoutingConfigRequest,
-            ExperimentEndpoint, JsonifiedRoutingAlgorithm, KeyDataType, RoutingBatchRequest,
-            RoutingBatchResponse, RoutingDictionaryRecord, RoutingEvaluateResponse, RoutingRequest,
-            RoutingRule, RuleSelection, SrDimensionConfig, StaticRoutingAlgorithm,
-            ELIGIBLE_DIMENSIONS,
+            EvaluatedAlgorithm, ExperimentEndpoint, JsonifiedRoutingAlgorithm, KeyDataType,
+            RoutingBatchRequest, RoutingBatchResponse, RoutingDictionaryRecord,
+            RoutingEvaluateResponse, RoutingRequest, RoutingRule, RuleSelection, SrDimensionConfig,
+            StaticRoutingAlgorithm, ELIGIBLE_DIMENSIONS,
         },
         utils::{
             apply_default_fallback, generate_random_id, is_valid_enum_value,
@@ -788,6 +788,8 @@ async fn build_no_active_algorithm_response(
         evaluated_output,
         eligible_connectors,
         selection: RuleSelection::NoActiveAlgorithm,
+        algorithm: None,
+        matched_rule: None,
     }
 }
 
@@ -934,6 +936,8 @@ async fn evaluate_algorithm_data(
 
     // Populated by the AbTest arm to tag analytics events with experiment context.
     let mut ab_evaluation: Option<AbEvaluation> = None;
+    // Set by the advanced algorithms, before the request's fallback replaces an unmatched answer.
+    let mut matched_rule: Option<String> = None;
 
     let (output, evaluated_output, rule_name): (Output, Vec<ConnectorInfo>, Option<String>) =
         match algorithm_data {
@@ -997,6 +1001,7 @@ async fn evaluate_algorithm_data(
                     )
                 })?;
 
+                matched_rule = ir.rule_name.clone();
                 apply_default_fallback(&mut ir, payload.fallback_output.as_deref());
 
                 (ir.output, ir.evaluated_output, ir.rule_name)
@@ -1048,6 +1053,7 @@ async fn evaluate_algorithm_data(
                     });
                 }
                 preview_flow_type = r.flow_type;
+                matched_rule = r.matched_rule;
                 (r.output, r.evaluated_output, r.rule_name)
             }
         };
@@ -1128,6 +1134,11 @@ async fn evaluate_algorithm_data(
         evaluated_output,
         eligible_connectors,
         selection,
+        algorithm: Some(EvaluatedAlgorithm {
+            id: algorithm.id.clone(),
+            name: algorithm.name.clone(),
+        }),
+        matched_rule,
     };
 
     Ok(EvaluationOutcome {
@@ -1647,6 +1658,8 @@ pub async fn routing_evaluate_batch(
                     evaluated_output: Vec::new(),
                     eligible_connectors: Vec::new(),
                     selection: RuleSelection::default(),
+                    algorithm: None,
+                    matched_rule: None,
                 });
             }
         }

@@ -143,6 +143,8 @@ Unknown fields are rejected.
   },
   "rule": {
     "status": "matched",
+    "algorithm": { "id": "routing_8f1c", "name": "Card routing" },
+    "matched_rule": "visa_credit_to_worldpay",
     "output": {
       "type": "priority",
       "connectors": [
@@ -221,7 +223,7 @@ Unknown fields are rejected.
 
 Codes are `snake_case`; new values may be added.
 
-Each routing layer (`rule`, `success_rate`, `cost`, `volume_steering`, `debit_routing`) has a section, null when the layer did not run. `success_rate.diagnostics` is for support and may change.
+Each routing layer (`rule`, `success_rate`, `cost`, `volume_steering`, `debit_routing`) has a section, null when the layer did not run. `rule.algorithm` is the active algorithm that was evaluated, and `rule.matched_rule` names the advanced-algorithm rule whose conditions matched (null for other algorithm types and when none matched). `success_rate.diagnostics` is for support and may change.
 
 `warnings` lists problems routed around, such as `rule_input_invalid` with `param` naming the field. Routing problems never fail the call.
 

@@ -10839,6 +10839,8 @@
         "additionalProperties": false,
         "required": [
           "status",
+          "algorithm",
+          "matched_rule",
           "output",
           "selected",
           "eligible"
@@ -10851,6 +10853,33 @@
               "default_selection",
               "no_active_rule"
             ]
+          },
+          "algorithm": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "description": "The active algorithm that was evaluated, as `/routing/list` names it; null when the merchant has none."
+          },
+          "matched_rule": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name of the advanced-algorithm rule whose conditions matched. It stays set when the rule's connectors were not all eligible; `outcome.reason` says what became of them. Null for other algorithm types and when no rule matched."
           },
           "output": {
             "type": "object",
