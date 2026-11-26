@@ -1719,13 +1719,12 @@ pub async fn verify_jwt_not_revoked(
 
     let app_state = get_tenant_app_state().await;
     let deny_key = format!("{}{}", JWT_DENYLIST_PREFIX, claims.jti);
-    match app_state.redis_conn.get_key_string(&deny_key).await {
+    // EXISTS answers absent with `false`, so only a failed Redis call reaches the error arm.
+    match app_state.redis_conn.key_exists(&deny_key).await {
         // On the denylist: refused, and never cached.
-        Ok(value) if !value.is_empty() => {
-            return Err(ContainerError::from(UserAuthError::InvalidToken))
-        }
+        Ok(true) => return Err(ContainerError::from(UserAuthError::InvalidToken)),
         // Confirmed absent from the denylist — the only answer worth remembering.
-        Ok(_) => {
+        Ok(false) => {
             if cache_ttl_ms > 0 {
                 jwt_live_cache(cache_ttl_ms).store(claims.jti.clone(), true);
             }
