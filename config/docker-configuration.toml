@@ -85,6 +85,19 @@ email_verification_enabled = false
 # Above 0, a logged-out session keeps working until the window expires.
 jwt_revocation_cache_ttl_ms = 0
 
+# Two-factor authentication (TOTP authenticator apps) for dashboard password logins.
+#   off      — no enrolment and no challenge
+#   optional — users may enrol from the Account page; enrolled users are asked for a code at login
+#   required — every login completes 2FA; users who have not enrolled first re-verify their email
+#              (a link that continues setup) and then enrol before they get a session
+# Anything but "off" needs an email backend (active_email_client) and a secret_key: a hex-encoded
+# 32-byte key (`openssl rand -hex 32`) that seals TOTP secrets and keys the recovery-code digests.
+# Keep it stable — changing it invalidates every enrolment. Can be KMS-encrypted like other secrets.
+[user_auth.two_factor_auth]
+mode = "off"
+issuer_name = "Juspay Decision Engine"
+secret_key = ""
+
 [admin_secret]
 secret = "test_admin"
 

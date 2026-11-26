@@ -12,36 +12,29 @@ import {
   Moon,
   Sun,
 } from 'lucide-react'
-import { useAuthStore, MerchantInfo } from '../store/authStore'
-import { useMerchantStore } from '../store/merchantStore'
+import { useAuthStore } from '../store/authStore'
 import { apiErrorMessage, apiFetch } from '../lib/api'
+import {
+  AuthResponse,
+  rememberPendingMerchantName,
+  useCompleteSignIn,
+} from '../hooks/useCompleteSignIn'
+import {
+  isTwoFactorChallenge,
+  TwoFactorChallenge,
+  TwoFactorFlow,
+} from '../components/auth/TwoFactorFlow'
 import { signupEnabled } from '../lib/appConfig'
 import { getResolvedThemePreference, persistThemePreference } from '../lib/theme'
 import { SurfaceLabel } from '../components/ui/Card'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
-
-interface AuthResponse {
-  token: string
-  user_id: string
-  email: string
-  merchant_id: string
-  role: string
-  merchants: MerchantInfo[]
-}
 
 interface SignupVerificationPendingResponse {
   email_verification_required: true
   message: string
 }
 
-type SignupResponse = AuthResponse | SignupVerificationPendingResponse
-
-interface CreateMerchantResponse {
-  token: string
-  merchant_id: string
-  merchant_name: string
-  merchants: MerchantInfo[]
-}
+type SignupResponse = AuthResponse | SignupVerificationPendingResponse | TwoFactorChallenge
 
 type Tab = 'login' | 'signup'
 
@@ -88,8 +81,8 @@ export function AuthPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const locationState = location.state as AuthLocationState | null
-  const { token, hasHydrated, setAuth, updateMerchant } = useAuthStore()
-  const { setMerchantId } = useMerchantStore()
+  const { token, hasHydrated } = useAuthStore()
+  const completeSignIn = useCompleteSignIn()
   const assetBaseUrl = import.meta.env.BASE_URL
   const passwordInputRef = useRef<HTMLInputElement>(null)
 
@@ -105,13 +98,15 @@ export function AuthPage() {
   const [focusPasswordOnLogin, setFocusPasswordOnLogin] = useState(
     Boolean(locationState?.focusPassword),
   )
+  const [challenge, setChallenge] = useState<TwoFactorChallenge | null>(null)
 
   useEffect(() => {
-    if (!hasHydrated || !token || loading) return
+    // A two-factor step that ends in a session navigates on its own, once any merchant is created.
+    if (!hasHydrated || !token || loading || challenge) return
     // A dashboard hand-off whose one-time code failed lands here; send the user where they were
     // headed rather than to the overview.
     navigate(takeDashboardRoute() ?? '/', { replace: true })
-  }, [hasHydrated, loading, navigate, token])
+  }, [challenge, hasHydrated, loading, navigate, token])
 
   useEffect(() => {
     setTab(getTabFromPath(location.pathname))
@@ -172,13 +167,17 @@ export function AuthPage() {
         body: JSON.stringify({ email, password }),
       })
 
+      if (isTwoFactorChallenge(res)) {
+        // The merchant is created once sign-in finishes, which may be in another tab opened from
+        // the verification email.
+        if (normalizedMerchantName) rememberPendingMerchantName(email, normalizedMerchantName)
+        setPassword('')
+        setChallenge(res)
+        return
+      }
+
       if ('email_verification_required' in res && res.email_verification_required) {
-        if (normalizedMerchantName) {
-          localStorage.setItem(
-            'pending_merchant_name',
-            JSON.stringify({ email, merchant_name: normalizedMerchantName }),
-          )
-        }
+        if (normalizedMerchantName) rememberPendingMerchantName(email, normalizedMerchantName)
         navigate('/login', {
           replace: true,
           state: {
@@ -188,39 +187,7 @@ export function AuthPage() {
         return
       }
 
-      const authRes = res as AuthResponse
-      setAuth(
-        authRes.token,
-        { userId: authRes.user_id, email: authRes.email, merchantId: authRes.merchant_id, role: authRes.role, isRedirectSession: false },
-        authRes.merchants,
-      )
-      if (authRes.merchant_id) setMerchantId(authRes.merchant_id)
-
-      const pendingRaw = localStorage.getItem('pending_merchant_name')
-      const pending = pendingRaw ? (() => { try { return JSON.parse(pendingRaw) } catch { return null } })() : null
-      const pendingMerchantName = (pending?.email === authRes.email ? pending.merchant_name : '') ?? ''
-      const merchantNameToUse = normalizedMerchantName || pendingMerchantName
-
-      if (merchantNameToUse && !authRes.merchant_id) {
-        localStorage.removeItem('pending_merchant_name')
-        const merchantRes = await apiFetch<CreateMerchantResponse>('/onboarding/merchant', {
-          method: 'POST',
-          body: JSON.stringify({ merchant_name: merchantNameToUse }),
-        })
-
-        updateMerchant(merchantRes.token, merchantRes.merchant_id, merchantRes.merchants)
-        setMerchantId(merchantRes.merchant_id)
-        navigate('/', { replace: true })
-        return
-      }
-
-      localStorage.removeItem('pending_merchant_name')
-
-      if (!authRes.merchant_id || authRes.merchants.length === 0) {
-        navigate('/onboarding', { replace: true })
-      } else {
-        navigate('/', { replace: true })
-      }
+      await completeSignIn(res as AuthResponse, normalizedMerchantName)
     } catch (err) {
       const msg = apiErrorMessage(err)
 
@@ -298,142 +265,155 @@ export function AuthPage() {
 
         <section className="flex min-h-[56vh] items-center justify-center px-6 py-10 sm:px-10 lg:min-h-screen lg:px-14 lg:py-12 xl:px-16">
           <div className="w-full max-w-[520px]">
-            <div className="text-center">
-              <h3 className="text-[clamp(2.25rem,3.6vw,3.15rem)] font-semibold tracking-[-0.05em] text-slate-950 dark:text-white">
-                {tab === 'login' ? 'Welcome back' : 'Create account'}
-              </h3>
-              <p className="mt-3 text-base text-slate-500 dark:text-[#8a94a7] mx-auto max-w-[57ch]">
-                {tab === 'login'
-                  ? 'Sign in to access your dashboard'
-                  : 'Create access for your Decision Engine dashboard'}
-              </p>
-            </div>
-
-            <div className="mt-10">
-              <div className="inline-flex rounded-full border border-slate-200 bg-white p-1 dark:border-[#27272a] dark:bg-[#121214]">
-                <AuthTabButton active={tab === 'login'} onClick={() => switchTab('login')}>
-                  Sign in
-                </AuthTabButton>
-                {signupEnabled ? (
-                  <AuthTabButton active={tab === 'signup'} onClick={() => switchTab('signup')}>
-                    Sign up
-                  </AuthTabButton>
-                ) : null}
-              </div>
-
-              <div className="mt-10 border-t border-slate-200 pt-10 dark:border-[#1d1d23]">
-                <form onSubmit={handleSubmit} className="space-y-5">
-                  <Field label="Email">
-                    <FieldInput
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="name@company.com"
-                      required
-                      icon={<Mail size={16} />}
-                    />
-                  </Field>
-
-                  {tab === 'signup' ? (
-                    <Field
-                      label="Merchant name"
-                      footer="This merchant will be available across routing, analytics, and audits."
-                    >
-                      <FieldInput
-                        type="text"
-                        value={merchantName}
-                        onChange={(e) => setMerchantName(e.target.value)}
-                        placeholder="e.g. Acme Corp"
-                        required
-                        icon={<Building2 size={16} />}
-                      />
-                    </Field>
-                  ) : null}
-
-                  <Field
-                    label="Password"
-                    footer={
-                      tab === 'login'
-                        ? undefined
-                        : 'Use at least 10 characters with uppercase, lowercase, number, and special character.'
-                    }
-                  >
-                    <div className="relative">
-                      <FieldInput
-                        type={showPassword ? 'text' : 'password'}
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        placeholder="Enter your password"
-                        required
-                        icon={<LockKeyhole size={16} />}
-                        inputRef={passwordInputRef}
-                        className="pr-12"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword((value) => !value)}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 transition-colors hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-                        aria-label={showPassword ? 'Hide password' : 'Show password'}
-                      >
-                        {showPassword ? <Eye size={18} /> : <EyeOff size={18} />}
-                      </button>
-                    </div>
-                  </Field>
-
-                  {tab === 'login' ? (
-                    <div className="-mt-1 flex justify-end">
-                      <Link
-                        to="/forgot-password"
-                        state={{ email }}
-                        className="text-sm font-medium text-brand-600 transition-colors hover:text-brand-700 dark:text-brand-500 dark:hover:text-brand-100"
-                      >
-                        Forgot password?
-                      </Link>
-                    </div>
-                  ) : null}
-
-                  {tab === 'signup' ? (
-                    <p className="text-xs leading-5 text-slate-500 dark:text-[#7b8496] max-w-[57ch]">
-                      Password policy: minimum 10 characters, including 1 uppercase letter, 1
-                      lowercase letter, 1 number, and 1 special character.
-                    </p>
-                  ) : null}
-
-                  <ErrorMessage error={error} />
-                  {notice ? (
-                    <div className="rounded-lg border border-sky-500/30 bg-sky-50 px-4 py-3 text-sm text-sky-700 dark:border-sky-500/20 dark:bg-sky-500/8 dark:text-sky-300">
-                      {notice}
-                    </div>
-                  ) : null}
-
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="group inline-flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(90deg,#4371ff_0%,#3a63f4_100%)] px-5 text-sm font-semibold text-white transition-all duration-200 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {loading ? (
-                      <>
-                        <Loader2 size={16} className="animate-spin" />
-                        Authenticating
-                      </>
-                    ) : (
-                      <>
-                        {tab === 'login' ? 'Enter dashboard' : 'Create account'}
-                        <ArrowRight
-                          size={16}
-                          className="transition-transform duration-200 group-hover:translate-x-0.5"
-                        />
-                      </>
-                    )}
-                  </button>
-                </form>
-
-                <div className="mt-10 border-t border-slate-200 pt-6 text-center text-xs text-slate-500 dark:border-[#1d1d23] dark:text-[#78849a]">
-                  <p>By continuing you agree to access policy and audit logging for account activity.</p>
-                  <p className="mt-4 text-slate-500 dark:text-[#78849a]">Juspay Decision Engine</p>
+            {challenge ? (
+              <TwoFactorFlow
+                challenge={challenge}
+                onAuthenticated={(session) => completeSignIn(session)}
+                onCancel={() => {
+                  setChallenge(null)
+                  setError(null)
+                }}
+              />
+            ) : (
+              <>
+                <div className="text-center">
+                  <h3 className="text-[clamp(2.25rem,3.6vw,3.15rem)] font-semibold tracking-[-0.05em] text-slate-950 dark:text-white">
+                    {tab === 'login' ? 'Welcome back' : 'Create account'}
+                  </h3>
+                  <p className="mt-3 text-base text-slate-500 dark:text-[#8a94a7] mx-auto max-w-[57ch]">
+                    {tab === 'login'
+                      ? 'Sign in to access your dashboard'
+                      : 'Create access for your Decision Engine dashboard'}
+                  </p>
                 </div>
-              </div>
-            </div>
+
+                <div className="mt-10">
+                  <div className="inline-flex rounded-full border border-slate-200 bg-white p-1 dark:border-[#27272a] dark:bg-[#121214]">
+                    <AuthTabButton active={tab === 'login'} onClick={() => switchTab('login')}>
+                      Sign in
+                    </AuthTabButton>
+                    {signupEnabled ? (
+                      <AuthTabButton active={tab === 'signup'} onClick={() => switchTab('signup')}>
+                        Sign up
+                      </AuthTabButton>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-10 border-t border-slate-200 pt-10 dark:border-[#1d1d23]">
+                    <form onSubmit={handleSubmit} className="space-y-5">
+                      <Field label="Email">
+                        <FieldInput
+                          type="email"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          placeholder="name@company.com"
+                          required
+                          icon={<Mail size={16} />}
+                        />
+                      </Field>
+
+                      {tab === 'signup' ? (
+                        <Field
+                          label="Merchant name"
+                          footer="This merchant will be available across routing, analytics, and audits."
+                        >
+                          <FieldInput
+                            type="text"
+                            value={merchantName}
+                            onChange={(e) => setMerchantName(e.target.value)}
+                            placeholder="e.g. Acme Corp"
+                            required
+                            icon={<Building2 size={16} />}
+                          />
+                        </Field>
+                      ) : null}
+
+                      <Field
+                        label="Password"
+                        footer={
+                          tab === 'login'
+                            ? undefined
+                            : 'Use at least 10 characters with uppercase, lowercase, number, and special character.'
+                        }
+                      >
+                        <div className="relative">
+                          <FieldInput
+                            type={showPassword ? 'text' : 'password'}
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            placeholder="Enter your password"
+                            required
+                            icon={<LockKeyhole size={16} />}
+                            inputRef={passwordInputRef}
+                            className="pr-12"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowPassword((value) => !value)}
+                            className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 transition-colors hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                            aria-label={showPassword ? 'Hide password' : 'Show password'}
+                          >
+                            {showPassword ? <Eye size={18} /> : <EyeOff size={18} />}
+                          </button>
+                        </div>
+                      </Field>
+
+                      {tab === 'login' ? (
+                        <div className="-mt-1 flex justify-end">
+                          <Link
+                            to="/forgot-password"
+                            state={{ email }}
+                            className="text-sm font-medium text-brand-600 transition-colors hover:text-brand-700 dark:text-brand-500 dark:hover:text-brand-100"
+                          >
+                            Forgot password?
+                          </Link>
+                        </div>
+                      ) : null}
+
+                      {tab === 'signup' ? (
+                        <p className="text-xs leading-5 text-slate-500 dark:text-[#7b8496] max-w-[57ch]">
+                          Password policy: minimum 10 characters, including 1 uppercase letter, 1
+                          lowercase letter, 1 number, and 1 special character.
+                        </p>
+                      ) : null}
+
+                      <ErrorMessage error={error} />
+                      {notice ? (
+                        <div className="rounded-lg border border-sky-500/30 bg-sky-50 px-4 py-3 text-sm text-sky-700 dark:border-sky-500/20 dark:bg-sky-500/8 dark:text-sky-300">
+                          {notice}
+                        </div>
+                      ) : null}
+
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className="group inline-flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(90deg,#4371ff_0%,#3a63f4_100%)] px-5 text-sm font-semibold text-white transition-all duration-200 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {loading ? (
+                          <>
+                            <Loader2 size={16} className="animate-spin" />
+                            Authenticating
+                          </>
+                        ) : (
+                          <>
+                            {tab === 'login' ? 'Enter dashboard' : 'Create account'}
+                            <ArrowRight
+                              size={16}
+                              className="transition-transform duration-200 group-hover:translate-x-0.5"
+                            />
+                          </>
+                        )}
+                      </button>
+                    </form>
+
+                    <div className="mt-10 border-t border-slate-200 pt-6 text-center text-xs text-slate-500 dark:border-[#1d1d23] dark:text-[#78849a]">
+                      <p>By continuing you agree to access policy and audit logging for account activity.</p>
+                      <p className="mt-4 text-slate-500 dark:text-[#78849a]">Juspay Decision Engine</p>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </section>
       </div>

@@ -815,6 +815,24 @@ pub struct User {
     #[cfg(feature = "postgres")]
     pub email_verified: bool,
     pub created_at: PrimitiveDateTime,
+    /// The TOTP seed, sealed by `auth::two_factor::TwoFactorKeys`. Present exactly when the user has
+    /// enrolled in two-factor authentication.
+    pub totp_secret: Option<String>,
+    /// JSON array of keyed digests of the unused recovery codes.
+    pub totp_recovery_codes: Option<String>,
+}
+
+impl User {
+    pub fn is_active(&self) -> bool {
+        #[cfg(feature = "mysql")]
+        {
+            self.is_active != 0
+        }
+        #[cfg(feature = "postgres")]
+        {
+            self.is_active
+        }
+    }
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -886,4 +904,12 @@ pub struct UserPasswordResetUpdate {
     pub email_verified: i8,
     #[cfg(feature = "postgres")]
     pub email_verified: bool,
+}
+
+/// Enrolls (`Some(Some(..))`), clears (`Some(None)`) or leaves alone (`None`) each two-factor column.
+#[derive(AsChangeset, Debug)]
+#[diesel(table_name = schema::users)]
+pub struct UserTwoFactorUpdate {
+    pub totp_secret: Option<Option<String>>,
+    pub totp_recovery_codes: Option<Option<String>>,
 }

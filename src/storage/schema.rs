@@ -573,6 +573,8 @@ diesel::table! {
         is_active -> TinyInt,
         email_verified -> TinyInt,
         created_at -> Datetime,
+        totp_secret -> Nullable<Text>,
+        totp_recovery_codes -> Nullable<Text>,
     }
 }
 

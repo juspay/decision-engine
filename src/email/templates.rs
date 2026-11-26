@@ -169,6 +169,42 @@ impl EmailVerificationTemplate {
     }
 }
 
+/// Sent when a user starts setting up two-factor authentication. Opening the link is what lets
+/// setup continue, so whoever enrols holds both the password and the mailbox.
+pub struct TwoFactorEmailVerificationTemplate {
+    pub user_email: String,
+    pub verification_url: String,
+    pub expires_in_minutes: i64,
+}
+
+impl TwoFactorEmailVerificationTemplate {
+    pub fn into_message(self) -> EmailMessage {
+        let content = format!(
+            r#"              <h1 style="margin:0 0 14px;font-size:20px;font-weight:600;color:#111827;line-height:1.3;">Verify your email to set up two-factor authentication</h1>
+              <p style="margin:0 0 28px;font-size:15px;line-height:1.6;color:#374151;">
+                Two-factor authentication is being set up on your Juspay Decision Engine account. Confirm this email address to continue setting up your authenticator app.
+              </p>
+{button}
+              <p style="margin:28px 0 0;font-size:13px;line-height:1.6;color:#6b7280;">
+                This link expires in {minutes} minutes. If you did not just sign in, do not open the link, and change your password.
+              </p>
+{fallback}"#,
+            button = primary_button(&self.verification_url, "Verify email and continue"),
+            fallback = fallback_link(&self.verification_url),
+            minutes = self.expires_in_minutes,
+        );
+
+        EmailMessage {
+            to: self.user_email,
+            subject: "Verify your email to set up two-factor authentication".to_string(),
+            html_body: render_layout(
+                "Confirm your email address to finish setting up two-factor authentication.",
+                &content,
+            ),
+        }
+    }
+}
+
 pub struct PasswordResetTemplate {
     pub user_email: String,
     pub reset_url: String,

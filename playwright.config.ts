@@ -23,6 +23,8 @@ import { SUPER_ADMIN_EMAIL } from './tests/fixtures/super-admin'
 const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:8080'
 // A second instance on the same datastores, for the specs that check behaviour across instances.
 const API_BASE_URL_B = process.env.API_BASE_URL_B || 'http://localhost:8099'
+// A third instance with two-factor authentication required, for tests/api/auth/two-factor.spec.ts.
+const API_BASE_URL_2FA = process.env.API_BASE_URL_2FA || 'http://localhost:8097'
 const UI_BASE_URL = process.env.UI_BASE_URL || 'http://localhost:5173'
 
 /**
@@ -65,6 +67,29 @@ const webServer = process.env.PW_NO_WEBSERVER
           DECISION_ENGINE__VOLUME_COMMITMENT__ENABLED: 'false',
           DECISION_ENGINE__COST_INGESTION__WORKER_ENABLED: 'false',
           DECISION_ENGINE__USER_AUTH__SUPER_ADMIN_EMAILS: SUPER_ADMIN_EMAIL,
+        },
+      },
+      {
+        // The two-factor instance, for tests/api/auth/two-factor.spec.ts. Same datastores, with
+        // two-factor authentication required and email sent to the Mailpit that CI starts beside the
+        // datastores (config/development.toml's [email.smtp] already points at it). A separate process
+        // because the mode is per deployment: on the suite's own server, every login would be held.
+        command: './target/debug/open_router',
+        url: `${API_BASE_URL_2FA}/health`,
+        reuseExistingServer: !process.env.CI,
+        timeout: 180_000,
+        stdout: 'pipe' as const,
+        stderr: 'pipe' as const,
+        env: {
+          ...(process.env as Record<string, string>),
+          DECISION_ENGINE__SERVER__PORT: new URL(API_BASE_URL_2FA).port,
+          DECISION_ENGINE__VOLUME_COMMITMENT__ENABLED: 'false',
+          DECISION_ENGINE__COST_INGESTION__WORKER_ENABLED: 'false',
+          DECISION_ENGINE__EMAIL__ACTIVE_EMAIL_CLIENT: 'smtp',
+          DECISION_ENGINE__USER_AUTH__TWO_FACTOR_AUTH__MODE: 'required',
+          // A test key: it seals only the secrets of the throwaway users this spec creates.
+          DECISION_ENGINE__USER_AUTH__TWO_FACTOR_AUTH__SECRET_KEY:
+            '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f',
         },
       },
       {

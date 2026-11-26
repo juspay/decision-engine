@@ -361,6 +361,21 @@ pub async fn signup(
             .change_context(UserAuthError::StorageError)?;
     }
 
+    // Where two-factor authentication is required, a new account signs in the way any other does:
+    // it verifies its email and enrols before it is issued a session.
+    if global_config.user_auth.two_factor_auth.mode == crate::config::TwoFactorMode::Required {
+        let user = User::find_all(&app_state.db, dsl::user_id.eq(user_id.clone()))
+            .await
+            .change_error(UserAuthError::StorageError)?
+            .pop()
+            .ok_or(UserAuthError::StorageError)?;
+        if let Some(challenge) =
+            super::two_factor_auth::login_challenge(&app_state, &global_config, &user).await?
+        {
+            return Ok(Json(SignupResponse::TwoFactorRequired(challenge)));
+        }
+    }
+
     let token = auth::generate_jwt(
         &user_id,
         &payload.email,
@@ -384,10 +399,18 @@ pub async fn signup(
     })))
 }
 
+/// A password login's answer: a session, or the second factor it still needs.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum LoginResponse {
+    Authenticated(AuthResponse),
+    TwoFactorRequired(super::two_factor_auth::TwoFactorChallenge),
+}
+
 #[axum::debug_handler]
 pub async fn login(
     Json(payload): Json<LoginRequest>,
-) -> Result<Json<AuthResponse>, error::ContainerError<UserAuthError>> {
+) -> Result<Json<LoginResponse>, error::ContainerError<UserAuthError>> {
     let app_state = get_tenant_app_state().await;
     let global_config = APP_STATE
         .get()
@@ -408,17 +431,7 @@ pub async fn login(
     // so this is a deployment requirement rather than a property of the binary.
     let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
 
-    let is_active = {
-        #[cfg(feature = "mysql")]
-        {
-            user.is_active != 0
-        }
-        #[cfg(feature = "postgres")]
-        {
-            user.is_active
-        }
-    };
-    if !is_active {
+    if !user.is_active() {
         return Err(error::ContainerError::from(UserAuthError::AccountInactive));
     }
 
@@ -442,7 +455,25 @@ pub async fn login(
         return Err(error::ContainerError::from(UserAuthError::InvalidPassword));
     }
 
-    let merchants = fetch_user_merchants(&app_state, &user.user_id).await?;
+    if let Some(challenge) =
+        super::two_factor_auth::login_challenge(&app_state, &global_config, &user).await?
+    {
+        return Ok(Json(LoginResponse::TwoFactorRequired(challenge)));
+    }
+
+    Ok(Json(LoginResponse::Authenticated(
+        issue_session(&app_state, &global_config, user).await?,
+    )))
+}
+
+/// The standard session a user gets once sign-in is complete: on their home merchant, or the
+/// first they belong to.
+pub(crate) async fn issue_session(
+    app_state: &crate::app::TenantAppState,
+    global_config: &crate::config::GlobalConfig,
+    user: User,
+) -> Result<AuthResponse, error::ContainerError<UserAuthError>> {
+    let merchants = fetch_user_merchants(app_state, &user.user_id).await?;
     let active_merchant_id = user.merchant_id.clone().unwrap_or_else(|| {
         merchants
             .first()
@@ -462,14 +493,14 @@ pub async fn login(
     )
     .change_context(UserAuthError::TokenGenerationFailed)?;
 
-    Ok(Json(AuthResponse {
+    Ok(AuthResponse {
         token: Secret::new(token),
         user_id: user.user_id,
         email: user.email,
         merchant_id: active_merchant_id,
         role,
         merchants,
-    }))
+    })
 }
 
 #[axum::debug_handler]
@@ -837,12 +868,14 @@ pub struct MemberInfo {
     pub role: String,
 }
 
-/// Signup response — either authenticated (no verification needed) or pending verification
+/// Signup response — authenticated (no verification needed), pending email verification, or
+/// continuing into two-factor enrolment
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub enum SignupResponse {
     Authenticated(AuthResponse),
     VerificationPending(SignupVerificationPendingResponse),
+    TwoFactorRequired(super::two_factor_auth::TwoFactorChallenge),
 }
 
 #[derive(Debug, Serialize)]
@@ -1499,17 +1532,7 @@ pub async fn forgot_password(
         None => return generic_ok(),
     };
 
-    let is_active = {
-        #[cfg(feature = "mysql")]
-        {
-            user.is_active != 0
-        }
-        #[cfg(feature = "postgres")]
-        {
-            user.is_active
-        }
-    };
-    if !is_active {
+    if !user.is_active() {
         return generic_ok();
     }
 
@@ -1672,7 +1695,9 @@ pub async fn verify_email(
     }))
 }
 
-fn extract_bearer_token(headers: &HeaderMap) -> Result<&str, error::ContainerError<UserAuthError>> {
+pub(crate) fn extract_bearer_token(
+    headers: &HeaderMap,
+) -> Result<&str, error::ContainerError<UserAuthError>> {
     headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())

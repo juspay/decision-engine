@@ -21,6 +21,7 @@ import { OnboardingPage } from './pages/OnboardingPage'
 import { MembersPage } from './pages/MembersPage'
 import { ApiKeysPage } from './pages/ApiKeysPage'
 import { VerifyEmailPage } from './pages/VerifyEmailPage'
+import { TwoFactorVerifyEmailPage } from './pages/TwoFactorVerifyEmailPage'
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
 import { ResetPasswordPage } from './pages/ResetPasswordPage'
 import { AccountPage } from './pages/AccountPage'
@@ -178,6 +179,7 @@ export default function App() {
         <Route path="login" element={<AuthPage />} />
         {signupEnabled ? <Route path="signup" element={<AuthPage />} /> : null}
         <Route path="verify-email" element={<VerifyEmailPage />} />
+        <Route path="two-factor/verify-email" element={<TwoFactorVerifyEmailPage />} />
         <Route path="forgot-password" element={<ForgotPasswordPage />} />
         <Route path="reset-password" element={<ResetPasswordPage />} />
         <Route element={<AuthGuard />}>
