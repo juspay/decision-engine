@@ -30,10 +30,6 @@ export function applyThemePreference(theme: ThemePreference = getResolvedThemePr
     return
   }
 
-  // Embedded in the dashboard, the theme is fixed to light and unchangeable: the frame must match
-  // the host's white chrome. This is the sole class-writer, so guarding here also neutralizes every
-  // toggle (they still persist to localStorage, but it is never read into the class while embedded)
-  // and overrides the system `prefers-color-scheme` preference.
   const effective = isEmbedded() ? 'light' : theme
   document.documentElement.classList.toggle('dark', effective === 'dark')
 }
@@ -44,4 +40,31 @@ export function persistThemePreference(theme: ThemePreference) {
   }
 
   applyThemePreference(theme)
+}
+
+export function applyThemeTokens(tokens: Record<string, string>) {
+  if (typeof document === 'undefined') return
+  
+  const root = document.documentElement
+  
+  // Allowlist of allowed CSS variable prefixes based on the issue scope
+  const allowedPrefixes = ['--color-brand', '--color-surface', '--color-text', '--radius', '--font']
+  
+  for (const [key, value] of Object.entries(tokens)) {
+    if (!key.startsWith('--') || typeof value !== 'string') continue
+    
+    const isAllowed = allowedPrefixes.some(prefix => key.startsWith(prefix))
+    if (!isAllowed) continue
+
+    // Validate and sanitize the value
+    // Reject urls, css functions like calc, expressions, and semicolons
+    if (/url\(|calc\(|expression\(|javascript:|;/i.test(value)) continue
+    
+    const safeValue = value.trim()
+    
+    // Only apply if length is reasonable to prevent arbitrary injection
+    if (safeValue.length > 0 && safeValue.length < 50) {
+      root.style.setProperty(key, safeValue)
+    }
+  }
 }

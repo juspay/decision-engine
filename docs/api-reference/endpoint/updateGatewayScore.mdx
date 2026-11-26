@@ -65,12 +65,22 @@ erroring. Note in particular that latency goes in `txnLatency.gatewayLatency`, n
   "message": "Gateway score updated successfully",
   "merchant_id": "merchant_demo",
   "gateway": "stripe",
-  "payment_id": "pay_sr_001"
+  "payment_id": "pay_sr_001",
+  "retry_decision": "RETRY_SAME_GATEWAY",
+  "unified_code": "insufficient_funds",
+  "unified_message": "Insufficient funds in the account",
+  "gsm_info": { ... }
 }
 ```
 
 When `errorInfo` is supplied in the request and matches a gateway status map rule, the response
-also carries a `gsm_info` object describing the lookup result.
+also carries a `retry_decision`, unified error parameters, and a `gsm_info` object describing the lookup result.
+The `retry_decision` will be one of:
+- `RETRY_SAME_GATEWAY`
+- `RETRY_DIFFERENT_GATEWAY` (Note: The engine natively supports this value, but the bundled GSM dataset currently does not trigger it.)
+- `DO_NOT_RETRY`
+
+If no mapping matches, it safely defaults to `DO_NOT_RETRY`.
 
 ## Notes
 
