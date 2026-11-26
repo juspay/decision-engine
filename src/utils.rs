@@ -138,7 +138,13 @@ impl<T> StringExt<T> for String {
     }
 }
 
-pub async fn call_api(url: &str, body: &serde_json::Value) -> Result<ResponseBody, ApiClientError> {
+/// POST `body` as JSON to `url`. `extra_headers` are sent as well but kept out of the debug log, so
+/// they may carry credentials.
+pub async fn call_api(
+    url: &str,
+    body: &serde_json::Value,
+    extra_headers: HeaderMap,
+) -> Result<ResponseBody, ApiClientError> {
     let client = Client::new();
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -146,6 +152,7 @@ pub async fn call_api(url: &str, body: &serde_json::Value) -> Result<ResponseBod
     crate::logger::debug!("Calling API: {}", url);
     crate::logger::debug!("Request Body: {}", body);
     crate::logger::debug!("Headers: {:?}", headers);
+    headers.extend(extra_headers);
 
     // Validate URL
     if url.parse::<Uri>().is_err() {

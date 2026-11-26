@@ -63,6 +63,12 @@ You must pass at least one profile.
 | `groovy-local` | Groovy runner built from local source |
 | `analytics-clickhouse` | Kafka topic init + ClickHouse analytics bootstrap only |
 
+The Groovy runner evaluates scripts only for callers that send the token in
+`GROOVY_RUNNER_AUTH_TOKEN`, and refuses to start without one. Compose passes the same
+token to the runner and the API containers, defaulting to a fixed local value; set
+`GROOVY_RUNNER_AUTH_TOKEN` in your shell to override it. A source-run API calling the
+runner needs the same variable exported.
+
 ## Fastest Bring-Up
 
 ### One-Command Local Dev

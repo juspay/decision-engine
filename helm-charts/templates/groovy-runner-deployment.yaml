@@ -36,6 +36,8 @@ spec:
             - name: http
               containerPort: {{ .Values.groovyRunner.service.port }}
               protocol: TCP
+          env:
+            {{- include "decision-engine.groovyRunnerAuthTokenEnv" . | nindent 12 }}
           {{- if .Values.groovyRunner.healthcheck.enabled }}
           livenessProbe:
             httpGet:

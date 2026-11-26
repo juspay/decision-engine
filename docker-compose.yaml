@@ -35,6 +35,7 @@ services:
           - decision-engine-api
     environment:
       - GROOVY_RUNNER_HOST=host.docker.internal:8085
+      - GROOVY_RUNNER_AUTH_TOKEN=${GROOVY_RUNNER_AUTH_TOKEN:-local-groovy-runner-token}
       # Metrics are pushed to the otel-collector (monitoring profile); off unless asked for.
       - DECISION_ENGINE__LOG__TELEMETRY__METRICS_ENABLED=${DE_METRICS_ENABLED:-false}
       - DECISION_ENGINE__LOG__TELEMETRY__OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
@@ -74,6 +75,7 @@ services:
           - decision-engine-api
     environment:
       - GROOVY_RUNNER_HOST=host.docker.internal:8085
+      - GROOVY_RUNNER_AUTH_TOKEN=${GROOVY_RUNNER_AUTH_TOKEN:-local-groovy-runner-token}
       # Metrics are pushed to the otel-collector (monitoring profile); off unless asked for.
       - DECISION_ENGINE__LOG__TELEMETRY__METRICS_ENABLED=${DE_METRICS_ENABLED:-false}
       - DECISION_ENGINE__LOG__TELEMETRY__OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
@@ -118,6 +120,7 @@ services:
           - decision-engine-api
     environment:
       - GROOVY_RUNNER_HOST=host.docker.internal:8085
+      - GROOVY_RUNNER_AUTH_TOKEN=${GROOVY_RUNNER_AUTH_TOKEN:-local-groovy-runner-token}
       # Metrics are pushed to the otel-collector (monitoring profile); off unless asked for.
       - DECISION_ENGINE__LOG__TELEMETRY__METRICS_ENABLED=${DE_METRICS_ENABLED:-false}
       - DECISION_ENGINE__LOG__TELEMETRY__OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
@@ -161,6 +164,7 @@ services:
           - decision-engine-api
     environment:
       - GROOVY_RUNNER_HOST=host.docker.internal:8085
+      - GROOVY_RUNNER_AUTH_TOKEN=${GROOVY_RUNNER_AUTH_TOKEN:-local-groovy-runner-token}
       # Metrics are pushed to the otel-collector (monitoring profile); off unless asked for.
       - DECISION_ENGINE__LOG__TELEMETRY__METRICS_ENABLED=${DE_METRICS_ENABLED:-false}
       - DECISION_ENGINE__LOG__TELEMETRY__OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
@@ -267,6 +271,8 @@ services:
     profiles:
       - groovy-ghcr
     restart: unless-stopped
+    environment:
+      - GROOVY_RUNNER_AUTH_TOKEN=${GROOVY_RUNNER_AUTH_TOKEN:-local-groovy-runner-token}
     ports:
       - "8085:8085"
     networks:
@@ -294,6 +300,8 @@ services:
     profiles:
       - groovy-local
     restart: unless-stopped
+    environment:
+      - GROOVY_RUNNER_AUTH_TOKEN=${GROOVY_RUNNER_AUTH_TOKEN:-local-groovy-runner-token}
     ports:
       - "8085:8085"
     networks:

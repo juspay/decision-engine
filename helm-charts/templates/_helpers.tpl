@@ -69,6 +69,24 @@ Create the name for the Groovy Runner
 {{- end }}
 
 {{/*
+The Secret holding the token the Groovy Runner requires on script evaluation
+*/}}
+{{- define "decision-engine.groovyRunnerAuthSecretName" -}}
+{{- default (printf "%s-auth" (include "decision-engine.groovyRunnerName" .)) .Values.groovyRunner.auth.existingSecret }}
+{{- end }}
+
+{{/*
+GROOVY_RUNNER_AUTH_TOKEN, read from the runner's auth Secret
+*/}}
+{{- define "decision-engine.groovyRunnerAuthTokenEnv" -}}
+- name: GROOVY_RUNNER_AUTH_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "decision-engine.groovyRunnerAuthSecretName" . }}
+      key: {{ ternary (.Values.groovyRunner.auth.existingSecretKey | default "token") "token" (not (empty .Values.groovyRunner.auth.existingSecret)) }}
+{{- end }}
+
+{{/*
 Create the name for the PostgreSQL Migration Job
 */}}
 {{- define "decision-engine.postgresqlMigrationName" -}}

@@ -114,6 +114,17 @@ pub fn groovy_executor_url() -> String {
     })
 }
 
+/// The token the Groovy runner requires on script evaluation, sent in [`GROOVY_RUNNER_AUTH_HEADER`].
+/// Unset or blank sends no token, which the runner rejects.
+pub fn groovy_runner_auth_token() -> Option<String> {
+    env::var("GROOVY_RUNNER_AUTH_TOKEN")
+        .ok()
+        .map(|token| token.trim().to_string())
+        .filter(|token| !token.is_empty())
+}
+
+pub const GROOVY_RUNNER_AUTH_HEADER: &str = "x-groovy-runner-token";
+
 impl FromStrExt for bool {
     type Error = String;
 
