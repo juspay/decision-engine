@@ -386,7 +386,9 @@ pub fn verify_password(password: &str, hash: &str) -> Result<bool, Report<AuthEr
 /// user, so response time does not show whether the account exists.
 pub fn verify_password_for_unknown_user(password: &str) {
     static UNMATCHABLE_HASH: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
-    let hash = UNMATCHABLE_HASH.get_or_init(|| hash_password(&generate_api_key()).ok());
+    // Hashed from a random value at first use, so no password can be known to match it.
+    let hash =
+        UNMATCHABLE_HASH.get_or_init(|| hash_password(&Uuid::new_v4().simple().to_string()).ok());
     if let Some(hash) = hash {
         let _ = bcrypt::verify(password, hash);
     }
