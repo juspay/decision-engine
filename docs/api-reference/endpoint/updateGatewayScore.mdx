@@ -49,6 +49,29 @@ curl --location "$BASE_URL/update-gateway-score" \
 }'
 ```
 
+`errorInfo` is optional. The `gateway` field supplies the connector used for the GSM lookup;
+`flow` and `subFlow` default to empty strings when omitted. `issuerErrorCode` and `cardNetwork`
+are used for issuer-specific mappings when both are present.
+
+For a failed authorization, include the gateway's error details:
+
+```json
+{
+  "merchantId": "merchant_demo",
+  "paymentId": "pay_sr_002",
+  "gateway": "stripe",
+  "status": "AUTHORIZATION_FAILED",
+  "errorInfo": {
+    "flow": "Payment",
+    "subFlow": "Authorize",
+    "errorCode": "do_not_honor",
+    "errorMessage": "The issuer declined the payment",
+    "issuerErrorCode": "05",
+    "cardNetwork": "Visa"
+  }
+}
+```
+
 `status` must be a transaction status value - `CHARGED`, `AUTHORIZATION_FAILED`,
 `AUTHENTICATION_FAILED`, `JUSPAY_DECLINED`, `FAILURE`, and so on. Lowercase values such as
 `success` are rejected with a 400.
@@ -71,6 +94,18 @@ erroring. Note in particular that latency goes in `txnLatency.gatewayLatency`, n
 
 When `errorInfo` is supplied in the request and matches a gateway status map rule, the response
 also carries a `gsm_info` object describing the lookup result.
+
+For failed transactions, the matched GSM row's `error_category` is used when it provides a
+recognized category. `CLIENT_ERROR`, `ISSUER_DECLINE`, and `MERCHANT_ERROR` outcomes do not
+penalize the gateway when the merchant's `gsm_based_scoring_filter_enabled_merchant` feature
+flag is enabled. `PSP_FAULT` continues to be penalized. Unknown or unmapped categories retain
+the existing penalty behavior. The filter does not suppress rewards for successful transactions,
+even when a success callback also contains `errorInfo`.
+
+The `gateway_score_feedback_total{category,outcome}` metric records failed-feedback filter
+decisions. `category` is normalized to `psp_fault`, `issuer_decline`, `client_error`,
+`merchant_error`, or `unknown`; `outcome` is `filtered` or `applied`. Connector error codes and
+messages are not metric labels.
 
 ## Notes
 
