@@ -36,6 +36,7 @@ use crate::feedback::gateway_selection_scoring_v3 as GSSV3;
 use crate::feedback::types as FT;
 use crate::feedback::utils as Fbu;
 use crate::feedback::utils::GatewayScoringType as GST;
+use crate::gsm::{GatewayIdentifier, Gsm};
 use crate::merchant_config_util as MerchantConfig;
 use crate::redis::{feature as Cutover, types::ServiceConfigKey};
 use crate::types::card::txn_card_info::TxnCardInfo;
@@ -520,6 +521,7 @@ pub async fn check_and_update_gateway_score_(
     // GSM-based scoring filter: skip penalization for failures where the gateway
     // is healthy (user/issuer-originated errors). Gated per merchant so it can be
     // rolled back instantly without a deploy.
+    let mut gateway_not_at_fault = false;
     if let Some(error_info) = api_payload.error_info.as_ref() {
         let gsm_filter_enabled = is_feature_enabled(
             GsmBasedScoringFilterEnabledMerchant.get_key(),
@@ -542,11 +544,9 @@ pub async fn check_and_update_gateway_score_(
         );
         if gsm_filter_enabled {
             // Connector must be the gateway that processed the payment.
-            let effective_error_info = crate::gsm::GsmErrorInfo {
-                connector: api_payload.gateway.clone(),
-                ..error_info.clone()
-            };
-            let gsm_lookup_result = crate::gsm::lookup(&effective_error_info);
+            let gsm_lookup_result = Gsm::source()
+                .find_rule(api_payload.gateway.connector_name(), error_info)
+                .await;
             logger::debug!(
                 action = "GSM_SCORING_FILTER_LOOKUP",
                 tag = "GSM_SCORING_FILTER_LOOKUP",
@@ -568,7 +568,7 @@ pub async fn check_and_update_gateway_score_(
                         gsm_info.unified_message,
                         gsm_info.step_up_possible,
                     );
-                    return Ok("Success".to_string());
+                    gateway_not_at_fault = true;
                 }
             }
         }
@@ -637,24 +637,35 @@ pub async fn check_and_update_gateway_score_(
             } else {
                 None
             };
-            // Call the function to check and update the gateway score
-            check_and_update_gateway_score(
-                txn_detail,
-                txn_card_info,
-                log_message,
-                enforce_failure,
-                api_payload.gateway_reference_id.clone(),
-                api_payload.txn_latency.clone(),
-                crate::analytics::AnalyticsRoute::UpdateGatewayScore,
-                crate::analytics::AnalyticsFlowContext::new(
-                    crate::analytics::ApiFlow::DynamicRouting,
-                    crate::analytics::FlowType::UpdateGatewayScoreScoreSnapshot,
-                ),
-                None,
-                Some(gateway_scoring_data),
-                lock_ttl_after_success,
-            )
-            .await;
+            if gateway_not_at_fault {
+                // Not scored, but locked like a scored update so a smart retry treats the gateway as tried.
+                take_score_lock(
+                    &txn_detail,
+                    &txn_card_info,
+                    enforce_failure,
+                    None,
+                    lock_ttl_after_success,
+                )
+                .await;
+            } else {
+                check_and_update_gateway_score(
+                    txn_detail,
+                    txn_card_info,
+                    log_message,
+                    enforce_failure,
+                    api_payload.gateway_reference_id.clone(),
+                    api_payload.txn_latency.clone(),
+                    crate::analytics::AnalyticsRoute::UpdateGatewayScore,
+                    crate::analytics::AnalyticsFlowContext::new(
+                        crate::analytics::ApiFlow::DynamicRouting,
+                        crate::analytics::FlowType::UpdateGatewayScoreScoreSnapshot,
+                    ),
+                    None,
+                    Some(gateway_scoring_data),
+                    lock_ttl_after_success,
+                )
+                .await;
+            }
 
             // Return success response
             Ok("Success".to_string())
@@ -705,7 +716,7 @@ pub async fn check_and_update_gateway_score_(
 
 /// The key to read a payment's scoring context from: the merchant-keyed one, or the payment-id-only
 /// key older code stored it under, while that one has not expired.
-async fn scoring_data_redis_key(merchant_id: &str, payment_id: &str) -> String {
+pub(crate) async fn scoring_data_redis_key(merchant_id: &str, payment_id: &str) -> String {
     let key = DC::scoring_data_key(merchant_id, payment_id);
     let legacy_key = format!("{}{}", C::GATEWAY_SCORING_DATA, payment_id);
     let redis = &get_tenant_app_state().await.redis_conn;
@@ -731,29 +742,13 @@ pub async fn check_and_update_gateway_score(
     gateway_scoring_data: Option<GatewayScoringData>,
     lock_ttl_after_success: Option<i64>,
 ) -> () {
-    // Get gateway scoring type
-    let gateway_scoring_type =
-        get_gateway_scoring_type(txn_detail.clone(), txn_card_info.clone(), enforce_failure).await;
-
     let gateway_in_string = txn_detail.gateway.clone().unwrap_or_default();
-
-    let merchant_id = get_m_id(txn_detail.merchantId.clone());
-    let update_score_lock_key = update_gateway_score_lock(
-        gateway_scoring_type.clone(),
-        &merchant_id,
-        &txn_detail.txnUuid,
-        &gateway_in_string,
-    );
-    // The lock lasts as long as the context, so a repeat is dropped for as long as it could score:
-    // the full TTL, or the shorter one the caller has already cut a succeeded payment's context to.
-    let full_ttl =
-        crate::decider::gatewaydecider::flow_new::scoring_data_ttl_secs(&merchant_id).await;
-    let lock_key_ttl = lock_ttl_after_success.map_or(full_ttl, |ttl| ttl.min(full_ttl));
-
-    let should_compute_gw_score = check_and_send_should_update_gateway_score(
-        update_score_lock_key,
-        lock_key_ttl,
+    let (gateway_scoring_type, should_compute_gw_score) = take_score_lock(
+        &txn_detail,
+        &txn_card_info,
+        enforce_failure,
         redis_comp_config.clone(),
+        lock_ttl_after_success,
     )
     .await;
 
@@ -790,6 +785,37 @@ pub async fn check_and_update_gateway_score(
             gateway_in_string,
         );
     }
+}
+
+/// Takes the score lock for this update's kind, payment and gateway; `false` when an earlier update took it.
+async fn take_score_lock(
+    txn_detail: &TxnDetail,
+    txn_card_info: &TxnCardInfo,
+    enforce_failure: bool,
+    redis_comp_config: Option<RedisCompressionConfigCombined>,
+    lock_ttl_after_success: Option<i64>,
+) -> (GatewayScoringType, bool) {
+    let gateway_scoring_type =
+        get_gateway_scoring_type(txn_detail.clone(), txn_card_info.clone(), enforce_failure).await;
+    let merchant_id = get_m_id(txn_detail.merchantId.clone());
+    let update_score_lock_key = update_gateway_score_lock(
+        gateway_scoring_type.clone(),
+        &merchant_id,
+        &txn_detail.txnUuid,
+        &txn_detail.gateway.clone().unwrap_or_default(),
+    );
+    // The lock lasts as long as the context, so a repeat is dropped for as long as it could score:
+    // the full TTL, or the shorter one the caller has already cut a succeeded payment's context to.
+    let full_ttl =
+        crate::decider::gatewaydecider::flow_new::scoring_data_ttl_secs(&merchant_id).await;
+    let lock_key_ttl = lock_ttl_after_success.map_or(full_ttl, |ttl| ttl.min(full_ttl));
+    let taken = check_and_send_should_update_gateway_score(
+        update_score_lock_key,
+        lock_key_ttl,
+        redis_comp_config,
+    )
+    .await;
+    (gateway_scoring_type, taken)
 }
 
 /// Cuts a succeeded payment's context to `scoring_data.after_success_ttl_secs`, keeping a TTL
@@ -1488,6 +1514,7 @@ mod tests {
             standardised_code: None,
             description: None,
             user_guidance_message: None,
+            retry_connectors: None,
         }
     }
 

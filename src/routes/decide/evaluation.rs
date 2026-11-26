@@ -519,8 +519,17 @@ pub(crate) async fn evaluate(
                     )
                     .await
                 {
-                    if let Err(err) =
-                        store_scoring_context_without_decider(&req, STATIC_ROUTING_APPROACH).await
+                    // The rule's evaluated connectors are the candidates, so a smart retry stays within them.
+                    let rule_connectors = static_eligible_gateways
+                        .as_ref()
+                        .filter(|connectors| !connectors.is_empty())
+                        .map(|connectors| extract_gateway_identifiers(connectors));
+                    if let Err(err) = store_scoring_context_without_decider(
+                        &req,
+                        STATIC_ROUTING_APPROACH,
+                        rule_connectors,
+                    )
+                    .await
                     {
                         crate::logger::warn!(
                             "failed to store scoring context for rule-routed payment {}: {}",

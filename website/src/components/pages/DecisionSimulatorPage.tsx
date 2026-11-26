@@ -2137,7 +2137,6 @@ export function DecisionSimulatorPage() {
     if (!info.error_code) return undefined
     const rule = resolveGsmRule(gateway, info.error_code)
     return {
-      connector: gateway,
       ...(rule?.flow && { flow: rule.flow }),
       ...(rule?.subFlow && { subFlow: rule.subFlow }),
       errorCode: info.error_code,
@@ -2157,7 +2156,6 @@ export function DecisionSimulatorPage() {
     const resolved = resolveSimErrorInfo(gateway, retryable ? 'retry' : 'do_default', getGwSimConfig(gateway).penalized)
     if (resolved?.errorCode) {
       return {
-        connector: gateway,
         ...(resolved.flow && { flow: resolved.flow }),
         ...(resolved.subFlow && { subFlow: resolved.subFlow }),
         errorCode: resolved.errorCode,
@@ -2172,7 +2170,6 @@ export function DecisionSimulatorPage() {
     if (!info.error_code) return undefined
     const rule = resolveGsmRule(gateway, info.error_code)
     return {
-      connector: gateway,
       ...(rule?.flow && { flow: rule.flow }),
       ...(rule?.subFlow && { subFlow: rule.subFlow }),
       errorCode: info.error_code,
@@ -2299,15 +2296,9 @@ export function DecisionSimulatorPage() {
         ...(singleRunOutcome === 'FAILURE' && { errorInfo: buildErrorInfo(res.decided_gateway) }),
       })
 
-      // Smart retry: if the failure is retryable and we have a fallback, attempt the next gateway
-      if (
-        smartRetryEnabled &&
-        gsmScoringFilterEnabled &&
-        singleRunOutcome === 'FAILURE' &&
-        scoreRes.gsm_info?.decision === 'retry' &&
-        res.fallback_gateways.length > 0
-      ) {
-        const retryGateway = res.fallback_gateways[0]
+      // Smart retry: a retryable failure is retried on DE's best remaining connector (retryConnectors is best SR first).
+      const retryGateway = scoreRes.gsm_info?.decision === 'retry' ? scoreRes.gsm_info.retryConnectors?.[0] : undefined
+      if (smartRetryEnabled && gsmScoringFilterEnabled && singleRunOutcome === 'FAILURE' && retryGateway) {
         await apiPost('/update-gateway-score', {
           merchantId: effectiveMerchantId,
           gateway: retryGateway,
@@ -2586,7 +2577,7 @@ export function DecisionSimulatorPage() {
         fallbackGateways.length > 0 &&
         Math.random() < SIM_RETRYABLE_FAILURE_SHARE
 
-      await apiPost<UpdateScoreResponse>('/update-gateway-score', {
+      const scoreRes = await apiPost<UpdateScoreResponse>('/update-gateway-score', {
         merchantId: effectiveMerchantId,
         gateway: decidedGateway,
         gatewayReferenceId: null,
@@ -2599,8 +2590,10 @@ export function DecisionSimulatorPage() {
       let retryGateway: string | undefined
       let retryStatus: TransactionOutcome | undefined
 
-      if (retryable) {
-        retryGateway = fallbackGateways[0]
+      // A retryable failure is retried on DE's best remaining connector (retryConnectors is best SR first).
+      const retryTarget = scoreRes.gsm_info?.decision === 'retry' ? scoreRes.gsm_info.retryConnectors?.[0] : undefined
+      if (retryable && retryTarget) {
+        retryGateway = retryTarget
         const retrySuccess = drawSuccess(retryGateway)
         const retryFailureMode = getGwFailureMode(retryGateway)
         retryStatus = retrySuccess ? 'CHARGED' : (retryFailureMode === 'timeout' ? 'PENDING_VBV' : 'FAILURE')

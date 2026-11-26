@@ -773,6 +773,8 @@ payjustnow = { country = "ZA", currency = "ZAR" }
 
 [gsm]
 source = "bundled"
+# true (SaaS): call Hyperswitch's GSM API via [hyperswitch_service]; false: use rules from `source`.
+hyperswitch_lookup = false
 
 [scoring_data]
 # How long /decide keeps a payment's scoring context in Redis, in seconds: how late its

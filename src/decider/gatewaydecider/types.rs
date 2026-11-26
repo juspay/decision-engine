@@ -551,6 +551,7 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
             udfs: None,
             udfs_consumed_for_routing: None,
             gatewayReferenceId: None,
+            eligibleConnectors: None,
         },
         ab_test_sr_override: None,
     }
@@ -584,6 +585,9 @@ pub struct GatewayScoringData {
     pub gatewayReferenceId: Option<String>,
     pub udfs: Option<UDFs>,
     pub udfs_consumed_for_routing: Option<String>,
+    /// Connectors `/decide` found eligible (`connector:mca`), the smart-retry candidates.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eligibleConnectors: Option<Vec<String>>,
 }
 
 impl GatewayScoringData {
@@ -677,6 +681,9 @@ pub struct GatewayScoringDataV2 {
     pub gatewayReferenceId: Option<String>,
     #[serde(default, skip_serializing_if = "is_empty_udfs")]
     pub udfs: Option<UDFs>,
+    /// Connectors `/decide` found eligible; omitted when there are none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eligibleConnectors: Option<Vec<String>>,
 }
 
 // Full scoring data to the compact form `flow_new` writes.
@@ -704,6 +711,7 @@ impl From<GatewayScoringData> for GatewayScoringDataV2 {
             country: data.country,
             gatewayReferenceId: data.gatewayReferenceId,
             udfs: data.udfs,
+            eligibleConnectors: data.eligibleConnectors.filter(|list| !list.is_empty()),
         }
     }
 }
@@ -736,6 +744,7 @@ impl From<GatewayScoringDataV2> for GatewayScoringData {
             // flow_new always wrote UDFs, empty when the order had none.
             udfs: Some(data.udfs.unwrap_or_else(|| UDFs(HashMap::new()))),
             udfs_consumed_for_routing: None,
+            eligibleConnectors: data.eligibleConnectors,
         }
     }
 }
@@ -2538,6 +2547,23 @@ mod stored_gateway_scoring_data_tests {
         assert_eq!(
             serde_json::to_value(GatewayScoringDataV2::from(new.clone()))?,
             v2
+        );
+
+        // Older contexts read eligible connectors as absent; a stored list round-trips.
+        assert_eq!(
+            (
+                old.eligibleConnectors.clone(),
+                new.eligibleConnectors.clone()
+            ),
+            (None, None)
+        );
+        let mut with_eligible = v2.clone();
+        with_eligible["eligibleConnectors"] = json!(["checkout:mca_cko", "worldpay:mca_wp"]);
+        let (is_v1, with_eligible_read) = read(with_eligible.clone())?;
+        assert!(!is_v1);
+        assert_eq!(
+            serde_json::to_value(GatewayScoringDataV2::from(with_eligible_read))?,
+            with_eligible
         );
 
         // A real bank code is kept.

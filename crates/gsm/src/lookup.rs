@@ -5,7 +5,7 @@ use crate::{
 
 /// Mirrors `create_issuer_code_lookup_key` in hyperswitch.
 /// The issuer lookup stores rules using this synthetic key in both `code` and `message`.
-fn issuer_lookup_key(card_network: &str, issuer_code: &str) -> String {
+pub fn issuer_lookup_key(card_network: &str, issuer_code: &str) -> String {
     format!("Network:{}|IssuerCode:{:0>2}", card_network, issuer_code)
 }
 
@@ -19,6 +19,7 @@ fn issuer_lookup_key(card_network: &str, issuer_code: &str) -> String {
 ///    `connector_error_message`, defaulting to empty string if absent.
 pub fn get_gsm_rule<'a, S: GsmLookup>(
     store: &'a S,
+    connector: &str,
     error_info: &GsmErrorInfo,
 ) -> Option<&'a GsmRule> {
     if let (Some(network), Some(issuer_code)) = (
@@ -27,7 +28,7 @@ pub fn get_gsm_rule<'a, S: GsmLookup>(
     ) {
         let key = issuer_lookup_key(network, issuer_code);
         if let Some(rule) = store.find_gsm_rule(
-            &error_info.connector,
+            connector,
             &error_info.flow,
             &error_info.sub_flow,
             &key,
@@ -38,7 +39,7 @@ pub fn get_gsm_rule<'a, S: GsmLookup>(
     }
 
     store.find_gsm_rule(
-        &error_info.connector,
+        connector,
         &error_info.flow,
         &error_info.sub_flow,
         error_info.error_code.as_deref().unwrap_or(""),
@@ -50,9 +51,10 @@ pub fn get_gsm_rule<'a, S: GsmLookup>(
 /// Returns `None` when no matching rule exists in the store.
 pub fn lookup_from_error_info<S: GsmLookup>(
     store: &S,
+    connector: &str,
     error_info: &GsmErrorInfo,
 ) -> Option<GsmInfo> {
-    let rule = get_gsm_rule(store, error_info)?;
+    let rule = get_gsm_rule(store, connector, error_info)?;
 
     Some(GsmInfo {
         decision: rule.decision.to_string(),
@@ -65,5 +67,6 @@ pub fn lookup_from_error_info<S: GsmLookup>(
         standardised_code: rule.standardised_code.clone(),
         description: rule.description.clone(),
         user_guidance_message: rule.user_guidance_message.clone(),
+        retry_connectors: None,
     })
 }

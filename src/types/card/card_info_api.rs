@@ -36,7 +36,8 @@ struct CardInfoResponse {
     numeric_country_code: Option<String>,
 }
 
-fn client() -> &'static reqwest::Client {
+/// The HTTP client for Hyperswitch lookups, shared by the cards-info and GSM lookups.
+pub(crate) fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
@@ -141,16 +142,17 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
     }
 
     let app_state = get_tenant_app_state().await;
-    let cfg = &app_state.config.card_info_service;
+    let cfg = &app_state.config.hyperswitch_service;
     if cfg.api_key.peek().is_empty() {
         logger::warn!(
             tag = "cardInfoApi",
-            "card_info_service.api_key not configured; skipping BIN enrichment"
+            "hyperswitch_service.api_key not configured; skipping BIN enrichment"
         );
         return None;
     }
 
-    let endpoint = cfg.base_url.trim_end_matches('/');
+    let cards_url = cfg.cards_url();
+    let endpoint = cards_url.as_str();
     let url = format!("{}/{}", endpoint, bin);
     let fut = client()
         .get(&url)

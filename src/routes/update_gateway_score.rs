@@ -23,7 +23,9 @@ use crate::decider::gatewaydecider::types::ErrorResponse;
 use crate::feedback::gateway_scoring_service::{
     check_and_update_gateway_score_, SCORE_UPDATE_SKIPPED,
 };
+use crate::feedback::smart_retry::RetryConnectors;
 use crate::feedback::types::{UpdateScorePayload, UpdateScoreResponse};
+use crate::gsm::{GatewayIdentifier, Gsm};
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use tokio_util::task::TaskTracker;
@@ -172,14 +174,29 @@ pub async fn update_gateway_score(
                 )
             }
             .emit();
-            // GSM lookup is a fast in-memory lookup — compute it synchronously so the
-            // caller gets the result immediately without waiting for the score update.
-            let gsm_info = payload.error_info.as_ref().and_then(|ei| {
-                crate::gsm::lookup(&crate::gsm::GsmErrorInfo {
-                    connector: payload.gateway.clone(),
-                    ..ei.clone()
-                })
-            });
+            // GSM (pod rules or a Hyperswitch call) is looked up before responding, only with errorInfo.
+            let mut gsm_info = match payload.error_info.as_ref() {
+                Some(error_info) => {
+                    Gsm::source()
+                        .find_rule(payload.gateway.connector_name(), error_info)
+                        .await
+                }
+                None => None,
+            };
+            // A retryable failure gets the connectors to retry on, so the caller need not ask again.
+            if let Some(info) = gsm_info.as_mut() {
+                if info.decision == crate::gsm::GsmDecision::Retry.to_string() {
+                    info.retry_connectors = Some(RetryConnectors::new(&payload).find().await);
+                }
+            }
+            // Marks a response enriched with a GSM rule, like `binEnrichmentFromCardInfo` for card info.
+            if gsm_info.is_some() {
+                crate::logger::debug!(
+                    action = "ruleEnrichmentFromGsm",
+                    tag = "ruleEnrichmentFromGsm",
+                    "Enriched gsm_info from GSM rule"
+                );
+            }
 
             let analytics_gsm_info = gsm_info.clone();
             let response = UpdateScoreResponse {

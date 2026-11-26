@@ -97,8 +97,9 @@ invalidation_channel = "decision_engine_invalidate" # Redis pub/sub channel for 
 [compression_filepath]
 zstd_compression_filepath = "/tmp/extra-paths/redis-zstd-dictionaries/sbx"
 
-[card_info_service]
-base_url = "https://integ.hyperswitch.io/api/cards"
+[hyperswitch_service]
+# Hyperswitch root URL for the cards-info ({base_url}/cards/{bin}) and GSM ({base_url}/gsm/get) lookups.
+base_url = "https://integ.hyperswitch.io/api"
 api_key = "hyperswitch_api_key"
 timeout_ms = 2000
 tenant_id = "public"
@@ -1158,3 +1159,5 @@ tls = "none"
 
 [gsm]
 source = "bundled"
+# true (SaaS): call Hyperswitch's GSM API via [hyperswitch_service]; false: use rules from `source`.
+hyperswitch_lookup = false

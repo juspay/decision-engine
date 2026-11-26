@@ -1293,7 +1293,6 @@ export function DecisionExplorerPage() {
     if (!info.error_code) return undefined
     const rule = resolveGsmRule(gateway, info.error_code)
     return {
-      connector: gateway,
       ...(rule?.flow && { flow: rule.flow }),
       ...(rule?.subFlow && { subFlow: rule.subFlow }),
       errorCode: info.error_code,
@@ -1308,7 +1307,6 @@ export function DecisionExplorerPage() {
     if (!info.error_code) return undefined
     const rule = resolveGsmRule(gateway, info.error_code)
     return {
-      connector: gateway,
       ...(rule?.flow && { flow: rule.flow }),
       ...(rule?.subFlow && { subFlow: rule.subFlow }),
       errorCode: info.error_code,
@@ -1435,15 +1433,9 @@ export function DecisionExplorerPage() {
         ...(singleRunOutcome === 'FAILURE' && { errorInfo: buildErrorInfo(res.decided_gateway) }),
       })
 
-      // Smart retry: if the failure is retryable and we have a fallback, attempt the next gateway
-      if (
-        smartRetryEnabled &&
-        gsmScoringFilterEnabled &&
-        singleRunOutcome === 'FAILURE' &&
-        scoreRes.gsm_info?.decision === 'retry' &&
-        res.fallback_gateways.length > 0
-      ) {
-        const retryGateway = res.fallback_gateways[0]
+      // Smart retry: a retryable failure is retried on DE's best remaining connector (retryConnectors is best SR first).
+      const retryGateway = scoreRes.gsm_info?.decision === 'retry' ? scoreRes.gsm_info.retryConnectors?.[0] : undefined
+      if (smartRetryEnabled && gsmScoringFilterEnabled && singleRunOutcome === 'FAILURE' && retryGateway) {
         await apiPost('/update-gateway-score', {
           merchantId: effectiveMerchantId,
           gateway: retryGateway,
@@ -1606,14 +1598,10 @@ export function DecisionExplorerPage() {
           let retryGateway: string | undefined
           let retryStatus: TransactionOutcome | undefined
 
-          if (
-            smartRetryEnabled &&
-            gsmScoringFilterEnabled &&
-            outcome === 'FAILURE' &&
-            scoreRes.gsm_info?.decision === 'retry' &&
-            decideRes.fallback_gateways.length > 0
-          ) {
-            retryGateway = decideRes.fallback_gateways[0]
+          // Smart retry: a retryable failure is retried on DE's best remaining connector (retryConnectors is best SR first).
+          const retryTarget = scoreRes.gsm_info?.decision === 'retry' ? scoreRes.gsm_info.retryConnectors?.[0] : undefined
+          if (smartRetryEnabled && gsmScoringFilterEnabled && outcome === 'FAILURE' && retryTarget) {
+            retryGateway = retryTarget
             const retryGwRate = getGwSuccessRate(retryGateway)
             const retrySuccess = Math.random() * 100 < retryGwRate
             const retryFailureMode = getGwFailureMode(retryGateway)

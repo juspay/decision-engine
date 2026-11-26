@@ -120,9 +120,12 @@ async fn load_s3(_config: &GsmConfig) -> ConfigGsmStore {
     panic!("[gsm] source = \"s3\" requires enabling the `s3` feature on the gsm crate");
 }
 
+/// The rules loaded in this process; empty when none were loaded (Hyperswitch GSM lookup).
 pub fn options() -> Vec<GsmOptionRow> {
-    get_store()
-        .rules()
+    GSM_STORE
+        .get()
+        .into_iter()
+        .flat_map(|store| store.rules())
         .map(|r| GsmOptionRow {
             connector: r.connector.clone(),
             flow: r.flow.clone(),
@@ -137,6 +140,7 @@ pub fn options() -> Vec<GsmOptionRow> {
         .collect()
 }
 
-pub fn lookup(error_info: &GsmErrorInfo) -> Option<GsmInfo> {
-    lookup_from_error_info(get_store(), error_info)
+/// The loaded rule for `connector`'s failure, if any.
+pub fn lookup(connector: &str, error_info: &GsmErrorInfo) -> Option<GsmInfo> {
+    lookup_from_error_info(get_store(), connector, error_info)
 }
