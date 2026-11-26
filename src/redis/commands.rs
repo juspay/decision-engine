@@ -444,6 +444,14 @@ impl RedisConnectionWrapper {
         &self,
         key: &str,
     ) -> Result<Option<String>, errors::RedisError> {
+        self.get_and_delete_key(key).await
+    }
+
+    /// [`Self::get_and_delete_key_string`] for a JSON value written by `set_key_with_ttl`.
+    pub async fn get_and_delete_key<T>(&self, key: &str) -> Result<Option<T>, errors::RedisError>
+    where
+        T: serde::de::DeserializeOwned,
+    {
         let value: Vec<u8> = self
             .conn
             .pool

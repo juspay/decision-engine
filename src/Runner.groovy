@@ -6,6 +6,8 @@ import org.kohsuke.groovy.sandbox.GroovyInterceptor
 import org.codehaus.groovy.runtime.MethodClosure
 import com.sun.net.httpserver.HttpServer
 import java.lang.reflect.Array
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import groovy.json.JsonSlurper
 import groovy.json.JsonOutput
 import java.lang.Exception
@@ -18,10 +20,34 @@ import sun.misc.Signal
 import sun.misc.SignalHandler
 
 class App {
+    static final String AUTH_TOKEN_ENV = "GROOVY_RUNNER_AUTH_TOKEN"
+    static final String AUTH_HEADER    = "X-Groovy-Runner-Token"
+
     static void main(String[] args) {
         def dslBuilderService = new DslBuilderService()
         def jsonParser        = new JsonSlurper()
         def server            = HttpServer.create(new InetSocketAddress(8085), 0)
+
+        // Script evaluation requires the token the decision engine sends in AUTH_HEADER.
+        def authToken = System.getenv(AUTH_TOKEN_ENV)?.trim()
+        if (!authToken) {
+            System.err.println("${AUTH_TOKEN_ENV} is not set; refusing to start")
+            System.exit(1)
+        }
+        def expectedToken = authToken.getBytes(StandardCharsets.UTF_8)
+        def authorized = { http ->
+            def presented = http.requestHeaders.getFirst(AUTH_HEADER)
+            if (presented != null
+                && MessageDigest.isEqual(presented.getBytes(StandardCharsets.UTF_8), expectedToken)) {
+                return true
+            }
+            http.requestBody.close()
+            http.responseHeaders.add("Content-type", "application/json")
+            def body = JsonOutput.toJson([error: true, error_message: "UNAUTHORIZED"]).getBytes(StandardCharsets.UTF_8)
+            http.sendResponseHeaders(401, body.length)
+            http.responseBody.withStream { it.write(body) }
+            return false
+        }
         
         ExecutorService threadPool = Executors.newCachedThreadPool()
         server.setExecutor(threadPool)
@@ -39,6 +65,9 @@ class App {
 
         server.createContext("/evaluate-script", {
             http ->
+                if (!authorized(http)) {
+                    return
+                }
                 http.responseHeaders.add("Content-type", "application/json")
                 http.responseBody.withWriter({ out ->
                   try {
@@ -95,6 +124,9 @@ class App {
 
         server.createContext("/", {
             http ->
+                if (!authorized(http)) {
+                    return
+                }
                 http.responseHeaders.add("Content-type", "application/json")
                 http.sendResponseHeaders(200, 0)
                 http.responseBody.withWriter({ out ->

@@ -1,5 +1,7 @@
 use crate::{
-    decider::configs::env_vars::groovy_executor_url,
+    decider::configs::env_vars::{
+        groovy_executor_url, groovy_runner_auth_token, GROOVY_RUNNER_AUTH_HEADER,
+    },
     error::ApiClientError,
     logger,
     redis::feature::roller,
@@ -1122,10 +1124,22 @@ pub async fn eval_script(
         "script": script,
     });
 
+    let mut headers = reqwest::header::HeaderMap::new();
+    if let Some(token) = groovy_runner_auth_token() {
+        match reqwest::header::HeaderValue::from_str(&token) {
+            Ok(mut value) => {
+                value.set_sensitive(true);
+                headers.insert(GROOVY_RUNNER_AUTH_HEADER, value);
+            }
+            Err(_) => logger::error!("GROOVY_RUNNER_AUTH_TOKEN is not a valid header value"),
+        }
+    }
+
     // Call the API
     let response = call_api(
         &format!("http://{}/evaluate-script", groovy_executor_url()),
         &payload,
+        headers,
     )
     .await;
 

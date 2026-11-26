@@ -239,8 +239,9 @@ Use a strong, random `jwt_secret` — 32+ characters recommended. Set `email_ver
 `jwt_revocation_cache_ttl_ms` caches "this token is not revoked" in memory, so authenticated
 requests skip the JWT denylist read in Redis for that many milliseconds. The cost is that
 **a logged-out session keeps working until the window expires**. Only the confirmed
-"not revoked" answer is cached — a denylisted token is refused, and a failed Redis read isn't
-stored — so an outage can't extend a revoked session. Token expiry (`exp`) is unaffected.
+"not revoked" answer is cached — a denylisted token is refused. When the denylist cannot be
+read, a session not already in the cache is refused with `503` until Redis answers again, so an
+outage can't revive a revoked session. Token expiry (`exp`) is unaffected.
 `0` (the default) reads Redis on every request; `1000` bounds revocation to a second.
 
 ### Two-factor authentication

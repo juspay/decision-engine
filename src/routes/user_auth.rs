@@ -424,15 +424,16 @@ pub async fn login(
         .await
         .change_error(UserAuthError::StorageError)?;
 
-    // UserNotFound and InvalidPassword render as the same 401 in into_response, so the response
-    // body is not an enumeration oracle. AccountInactive and EmailNotVerified stay distinct so the
-    // user knows which step to take. An unknown email returns before bcrypt runs, so response
-    // timing does differ and separating the two takes repeated sampling. By design, the control on
-    // that sampling is the Envoy rate limit fronting the deployment, not this handler — see
-    // public_routes in app.rs, which carries no in-process limiter or lockout on purpose. Accepted
-    // on that basis. A deployment that does not reproduce the edge policy has an unmetered oracle,
-    // so this is a deployment requirement rather than a property of the binary.
-    let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
+    // UserNotFound and InvalidPassword render as the same 401 in into_response, and an unknown
+    // email still runs a bcrypt comparison, so neither the body nor the timing tells the two
+    // apart. AccountInactive and EmailNotVerified stay distinct so the user knows which step to
+    // take. Attempt rate is limited at the edge rather than in this handler — see public_routes
+    // in app.rs, which carries no in-process limiter or lockout — so a deployment must put a rate
+    // limit in front of the auth routes.
+    let Some(user) = users.pop() else {
+        auth::verify_password_for_unknown_user(payload.password.peek());
+        return Err(error::ContainerError::from(UserAuthError::UserNotFound));
+    };
 
     if !user.is_active() {
         return Err(error::ContainerError::from(UserAuthError::AccountInactive));
@@ -896,7 +897,13 @@ pub struct VerifyEmailResponse {
 pub async fn invite_member(
     headers: HeaderMap,
     Json(payload): Json<InviteMemberRequest>,
-) -> Result<Json<InviteMemberResponse>, error::ContainerError<UserAuthError>> {
+) -> Result<
+    (
+        [(axum::http::HeaderName, &'static str); 1],
+        Json<InviteMemberResponse>,
+    ),
+    error::ContainerError<UserAuthError>,
+> {
     let token = extract_bearer_token(&headers)?;
     let global_config = APP_STATE
         .get()
@@ -995,12 +1002,15 @@ pub async fn invite_member(
             }
         }
 
-        Ok(Json(InviteMemberResponse {
-            email: existing_user.email,
-            is_new_user: false,
-            password: None,
-            role,
-        }))
+        Ok((
+            [(axum::http::header::CACHE_CONTROL, "no-store")],
+            Json(InviteMemberResponse {
+                email: existing_user.email,
+                is_new_user: false,
+                password: None,
+                role,
+            }),
+        ))
     } else {
         // Create new user with generated password
         let generated_password = generate_random_password();
@@ -1055,7 +1065,7 @@ pub async fn invite_member(
         }
 
         let email_config = &global_config.email;
-        if email_config.is_active() {
+        let emailed = if email_config.is_active() {
             let email_client = APP_STATE
                 .get()
                 .map(|s| s.email_client.clone())
@@ -1069,23 +1079,32 @@ pub async fn invite_member(
             }
             .into_message();
 
-            if let Err(err) = email_client.send_email(email_msg).await {
-                crate::logger::warn!(
-                    to = %payload.email,
-                    error = ?err,
-                    "Failed to send invite email; invite still succeeded"
-                );
+            match email_client.send_email(email_msg).await {
+                Ok(_) => true,
+                Err(err) => {
+                    crate::logger::warn!(
+                        to = %payload.email,
+                        error = ?err,
+                        "Failed to send invite email; returning the password to the inviting admin"
+                    );
+                    false
+                }
             }
-        }
+        } else {
+            false
+        };
 
-        // The inviting admin needs the credential to pass on and the email invite is
-        // best-effort, so it is returned here by design. Analytics masks the field.
-        Ok(Json(InviteMemberResponse {
-            email: payload.email,
-            is_new_user: true,
-            password: Some(Secret::new(generated_password)),
-            role,
-        }))
+        // The temporary password reaches the new member by email. Only when that email was not
+        // sent does the inviting admin receive it, to pass on themselves.
+        Ok((
+            [(axum::http::header::CACHE_CONTROL, "no-store")],
+            Json(InviteMemberResponse {
+                email: payload.email,
+                is_new_user: true,
+                password: (!emailed).then(|| Secret::new(generated_password)),
+                role,
+            }),
+        ))
     }
 }
 
@@ -1731,21 +1750,22 @@ pub async fn verify_jwt_not_revoked(
 
     let app_state = get_tenant_app_state().await;
     let deny_key = format!("{}{}", JWT_DENYLIST_PREFIX, claims.jti);
-    match app_state.redis_conn.get_key_string(&deny_key).await {
+    // EXISTS answers absent with `false`, so only a failed Redis call reaches the error arm.
+    match app_state.redis_conn.key_exists(&deny_key).await {
         // On the denylist: refused, and never cached.
-        Ok(value) if !value.is_empty() => {
-            return Err(ContainerError::from(UserAuthError::InvalidToken))
-        }
+        Ok(true) => return Err(ContainerError::from(UserAuthError::InvalidToken)),
         // Confirmed absent from the denylist — the only answer worth remembering.
-        Ok(_) => {
+        Ok(false) => {
             if cache_ttl_ms > 0 {
                 jwt_live_cache(cache_ttl_ms).store(claims.jti.clone(), true);
             }
         }
-        // Denylist unreadable: admit the request, but store nothing. Caching an unverified
-        // token would turn a momentary Redis failure into a full TTL of accepting revoked
-        // sessions; the next request reads the denylist again.
-        Err(_) => {}
+        // Denylist unreadable: the token may have been revoked, so it is refused until the
+        // denylist can be read again.
+        Err(err) => {
+            crate::logger::warn!(error = ?err, "JWT denylist unreadable; refusing the session");
+            return Err(ContainerError::from(UserAuthError::SessionCheckUnavailable));
+        }
     }
 
     Ok(claims)
@@ -1952,30 +1972,21 @@ pub async fn exchange_merchant_token(
     let app_state = get_tenant_app_state().await;
     let code_key = format!("{}{}", HS_SSO_CODE_PREFIX, payload.code.peek());
 
-    // Read the scope and grant behind the code. A missing/expired/unknown code reads as NotFound —
-    // treat any failure to read it as an invalid code (401), not a server error (500).
-    let (merchant_id, grant, perms, email) = match app_state
+    // GETDEL reads and consumes the code in one step, so of two concurrent redemptions only one
+    // gets the grant back. A missing, expired, already-used or unreadable code is an invalid code
+    // (401); only a failed Redis call is a server error.
+    let (merchant_id, grant, perms, email) = app_state
         .redis_conn
-        .get_key::<HandoffCode>(&code_key, "HandoffCode")
+        .get_and_delete_key::<HandoffCode>(&code_key)
         .await
-    {
-        Ok(entry) => entry.resolve(),
-        Err(_) => return Err(error::ContainerError::from(UserAuthError::InvalidToken)),
-    };
-
-    // Atomically claim the code by deleting it. `DEL` is atomic and reports whether *this* call
-    // removed the key, so with two concurrent redemptions exactly one sees KeyDeleted — the
-    // other (already consumed, expired, or replayed) is rejected. This revision's DelReply is a
-    // bare enum with no helper methods, so match the variant directly.
-    let claimed = app_state
-        .redis_conn
-        .delete_key(&code_key)
-        .await
-        .change_context(UserAuthError::StorageError)?;
-
-    if !matches!(claimed, redis_interface::types::DelReply::KeyDeleted) {
-        return Err(error::ContainerError::from(UserAuthError::InvalidToken));
-    }
+        .map_err(|err| match err.current_context() {
+            redis_interface::errors::RedisError::JsonDeserializationFailed => {
+                UserAuthError::InvalidToken
+            }
+            _ => UserAuthError::StorageError,
+        })?
+        .ok_or(UserAuthError::InvalidToken)?
+        .resolve();
 
     let synthetic_user_id = format!("hs_{}", merchant_id);
 

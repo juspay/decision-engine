@@ -503,8 +503,8 @@ pub async fn delete_column_mapping(
 /// Deliberately not applied to the 4xx paths: a rejected column mapping ("'Payable (SC)' is mapped
 /// to 'X', which is not a column in this file") is the merchant's own input described back to them,
 /// and it is the entire value of that response.
-fn storage_error(op: &str, e: crate::cost_ingestion::IngestError) -> RouteError {
-    logger::error!(tag = "report_upload", "{} failed: {:?}", op, e);
+pub(super) fn storage_error(op: &str, e: crate::cost_ingestion::IngestError) -> RouteError {
+    logger::error!(tag = "cost_ingestion", "{} failed: {:?}", op, e);
     RouteError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("could not {op}"))
 }
 

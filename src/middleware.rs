@@ -308,11 +308,22 @@ pub async fn authenticate(
                 req.extensions_mut().insert(context);
                 return Ok(next.run(req).await);
             }
-            Err(_) => {
+            Err(err) => {
+                // 503 rather than 401, so the dashboard keeps the session and retries instead of
+                // signing the user out.
+                if matches!(
+                    err.error.current_context(),
+                    crate::error::UserAuthError::SessionCheckUnavailable
+                ) {
+                    return Ok(crate::error::text_error_response(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "Session could not be verified, try again shortly",
+                    ));
+                }
                 return Ok(crate::error::text_error_response(
                     StatusCode::UNAUTHORIZED,
                     "Invalid or expired token",
-                ))
+                ));
             }
         }
     }

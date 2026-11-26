@@ -201,6 +201,8 @@ The chart can wire Decision Engine to external Kafka and ClickHouse analytics in
 | `groovyRunner.networkPolicy.enabled`    | Allow ingress to the runner only from decision-engine pods and close its egress | `true` |
 | `groovyRunner.networkPolicy.extraIngress` | Additional ingress rules for the runner                  | `[]`            |
 | `groovyRunner.networkPolicy.extraEgress` | Egress rules for the runner (e.g. a service-mesh sidecar's control plane) | `[]` |
+| `groovyRunner.auth.existingSecret`      | Secret holding the token the runner requires from decision-engine; empty creates one with a random token, kept across upgrades | `""` |
+| `groovyRunner.auth.existingSecretKey`   | Key of the token in `groovyRunner.auth.existingSecret`     | `"token"`       |
 
 ### Database Migration Configuration
 

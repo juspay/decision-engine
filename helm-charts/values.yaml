@@ -236,6 +236,12 @@ groovyRunner:
     enabled: true
     extraIngress: []
     extraEgress: []
+  # The runner evaluates scripts only for callers presenting this token, which
+  # the decision-engine pods send. With no existingSecret, the chart creates a
+  # Secret with a random token and keeps it across upgrades.
+  auth:
+    existingSecret: ""
+    existingSecretKey: "token"
   image:
     repository: "ghcr.io/juspay/decision-engine/groovy-runner"
     version: "v1.4"
