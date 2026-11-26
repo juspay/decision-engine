@@ -53,12 +53,15 @@
 //! checks the `Cko-Signature` HMAC over the raw body, keeps only Financial Actions reports, and
 //! extracts the `rpt_…` handle; `download_report` then fetches the report's CSV file(s) from the
 //! Reports API (`GET /reports/{id}` → file ids → `GET /reports/{id}/files/{fileId}`) with the stored
-//! secret key. Credentials are keyed by the report's Checkout **entity id** — `peek_account` reads
+//! secret key. The file endpoint redirects to a short-lived download location, which is fetched
+//! without the key. Credentials are keyed by the report's Checkout **entity id** — `peek_account` reads
 //! `data.account.entity_id` from the *unverified* body so the handler can load that account's key.
 //!
 //! [`report_generated`]: https://www.checkout.com/docs/developer-resources/event-notifications/event-types/report_generated
 
-use super::common::{http_client, lenient_string, parse_notification_json, to_float};
+use super::common::{
+    http_client, http_client_without_redirects, lenient_string, parse_notification_json, to_float,
+};
 use crate::cost_ingestion::card_network::network_key;
 use std::collections::{HashMap, HashSet};
 
@@ -303,15 +306,16 @@ impl SettlementReportSource for CheckoutReportSource {
     ) -> Result<Bytes, IngestError> {
         let cko = CheckoutCreds::parse(creds)?;
         let report_id = note.report_ref.trim();
-        if report_id.is_empty() {
+        if !is_checkout_id(report_id, REPORT_ID_PREFIX) {
             return Err(IngestError::Download(
-                "checkout: empty report id".to_string(),
+                "checkout: report id is not a Checkout report id".to_string(),
             ));
         }
 
-        // 1. Get report details → the file ids that make up this report.
+        // 1. Get report details → the file ids that make up this report. Answered directly, so a
+        // redirect here is an error rather than something to follow with the secret key attached.
         let details_url = format!("{}/reports/{}", cko.base(), report_id);
-        let resp = http_client()
+        let resp = http_client_without_redirects()
             .get(&details_url)
             .bearer_auth(&cko.secret_key)
             .header("Accept", "application/json")
@@ -341,6 +345,11 @@ impl SettlementReportSource for CheckoutReportSource {
                 "checkout report has no files".to_string(),
             ));
         }
+        if !file_ids.iter().all(|id| is_checkout_id(id, FILE_ID_PREFIX)) {
+            return Err(IngestError::Download(
+                "checkout report lists a file id that is not a Checkout file id".to_string(),
+            ));
+        }
 
         // 2. Download each CSV file. A report over 1M rows is split across files, each carrying its
         // own header; concatenate them into one CSV, dropping the repeated header of every file
@@ -348,23 +357,7 @@ impl SettlementReportSource for CheckoutReportSource {
         let mut out: Vec<u8> = Vec::new();
         for (i, file_id) in file_ids.iter().enumerate() {
             let file_url = format!("{}/reports/{}/files/{}", cko.base(), report_id, file_id);
-            let resp = http_client()
-                .get(&file_url)
-                .bearer_auth(&cko.secret_key)
-                .header("Accept", "text/csv")
-                .send()
-                .await
-                .map_err(|e| IngestError::Download(format!("checkout report file: {e}")))?;
-            if !resp.status().is_success() {
-                return Err(IngestError::Download(format!(
-                    "checkout report file status {}",
-                    resp.status()
-                )));
-            }
-            let bytes = resp
-                .bytes()
-                .await
-                .map_err(|e| IngestError::Download(e.to_string()))?;
+            let bytes = fetch_report_file(&cko, &file_url).await?;
             if i == 0 {
                 out.extend_from_slice(&bytes);
             } else {
@@ -592,6 +585,65 @@ fn hex_encode(bytes: &[u8]) -> String {
         s.push(char::from_digit((b & 0x0f) as u32, 16).unwrap());
     }
     s
+}
+
+const REPORT_ID_PREFIX: &str = "rpt_";
+const FILE_ID_PREFIX: &str = "file_";
+
+/// Whether `id` has the shape of a Checkout id: `prefix` followed by 26 word characters
+/// (`rpt_lmmldzousk7etoqijqundqexa4`). Only such ids are placed in a Reports API path.
+fn is_checkout_id(id: &str, prefix: &str) -> bool {
+    id.strip_prefix(prefix).is_some_and(|rest| {
+        rest.len() == 26 && rest.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    })
+}
+
+/// Fetch one report file. `Get report file` answers with a redirect to a short-lived download
+/// location; that location is fetched without the secret key, which only the Reports API receives.
+/// A redirect from an https API host must stay on https.
+async fn fetch_report_file(cko: &CheckoutCreds, file_url: &str) -> Result<Bytes, IngestError> {
+    let resp = http_client_without_redirects()
+        .get(file_url)
+        .bearer_auth(&cko.secret_key)
+        .header("Accept", "text/csv")
+        .send()
+        .await
+        .map_err(|e| IngestError::Download(format!("checkout report file: {e}")))?;
+
+    let resp = if resp.status().is_redirection() {
+        let location = resp
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| {
+                IngestError::Download("checkout report file redirect has no location".to_string())
+            })?;
+        let target = resp.url().join(location).map_err(|e| {
+            IngestError::Download(format!("checkout report file redirect location: {e}"))
+        })?;
+        if resp.url().scheme() == "https" && target.scheme() != "https" {
+            return Err(IngestError::Download(
+                "checkout report file redirect leaves https".to_string(),
+            ));
+        }
+        http_client()
+            .get(target)
+            .send()
+            .await
+            .map_err(|e| IngestError::Download(format!("checkout report file download: {e}")))?
+    } else {
+        resp
+    };
+
+    if !resp.status().is_success() {
+        return Err(IngestError::Download(format!(
+            "checkout report file status {}",
+            resp.status()
+        )));
+    }
+    resp.bytes()
+        .await
+        .map_err(|e| IngestError::Download(e.to_string()))
 }
 
 /// Drop the leading header line (up to and including the first newline) of a split report file, so
@@ -1145,5 +1197,122 @@ ic_orphan,Capture,Interchange Fixed Fee,VISA,Credit,Consumer,SA,USD,-102.29,2026
             CheckoutCreds::parse(&empty),
             Err(IngestError::MalformedNotification(_))
         ));
+    }
+
+    const REPORT_ID: &str = "rpt_lmmldzousk7etoqijqundqexa4";
+    const FILE_ID: &str = "file_7ysmgfkj4ipunduud22uf73iey";
+
+    #[test]
+    fn only_checkout_shaped_ids_are_accepted() {
+        assert!(is_checkout_id(REPORT_ID, REPORT_ID_PREFIX));
+        assert!(is_checkout_id(FILE_ID, FILE_ID_PREFIX));
+        assert!(!is_checkout_id(FILE_ID, REPORT_ID_PREFIX));
+        assert!(!is_checkout_id("rpt_1", REPORT_ID_PREFIX));
+        assert!(!is_checkout_id(
+            "rpt_lmmldzousk7etoqijqund-xy",
+            REPORT_ID_PREFIX
+        ));
+        assert!(!is_checkout_id(
+            "rpt_lmmldzousk7etoqijqundqe.a",
+            REPORT_ID_PREFIX
+        ));
+    }
+
+    /// Serve `router` on a local port, returning its `http://` origin.
+    async fn serve(router: axum::Router) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let origin = format!("http://{}", listener.local_addr().expect("addr"));
+        tokio::spawn(async move { axum::serve(listener, router).await });
+        origin
+    }
+
+    fn creds_for(api_base_url: &str) -> ConnectorCreds {
+        ConnectorCreds {
+            webhook_secret: Secret::new(String::new()),
+            download_auth: Secret::new(
+                serde_json::json!({ "secret_key": "sk_test", "api_base_url": api_base_url })
+                    .to_string(),
+            ),
+        }
+    }
+
+    fn note_for(report_ref: &str) -> ReportNotification {
+        ReportNotification {
+            notification_id: "evt_1".to_string(),
+            report_ref: report_ref.to_string(),
+            report_date: None,
+            account: "ent_1".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn report_files_are_downloaded_from_the_redirect_without_the_secret_key() {
+        use axum::http::{header, StatusCode};
+        use axum::routing::get;
+        use std::sync::{Arc, Mutex};
+
+        let download_auth_headers: Arc<Mutex<Vec<Option<String>>>> = Arc::default();
+        let seen = Arc::clone(&download_auth_headers);
+        let storage = serve(axum::Router::new().route(
+            "/download.csv",
+            get(move |headers: HeaderMap| {
+                let seen = Arc::clone(&seen);
+                async move {
+                    let auth = headers
+                        .get(header::AUTHORIZATION)
+                        .and_then(|v| v.to_str().ok())
+                        .map(str::to_string);
+                    seen.lock().expect("lock").push(auth);
+                    "Payment ID\npay_1\n"
+                }
+            }),
+        ))
+        .await;
+
+        let location = format!("{storage}/download.csv");
+        let api = serve(
+            axum::Router::new()
+                .route(
+                    "/reports/:id",
+                    get(|headers: HeaderMap| async move {
+                        if headers.get(header::AUTHORIZATION).map(|v| v.as_bytes())
+                            != Some(b"Bearer sk_test".as_slice())
+                        {
+                            return Err(StatusCode::UNAUTHORIZED);
+                        }
+                        Ok(axum::Json(
+                            serde_json::json!({ "files": [{ "id": FILE_ID }] }),
+                        ))
+                    }),
+                )
+                .route(
+                    "/reports/:id/files/:file_id",
+                    get(move || async move { (StatusCode::FOUND, [(header::LOCATION, location)]) }),
+                ),
+        )
+        .await;
+
+        let bytes = CheckoutReportSource
+            .download_report(&creds_for(&api), &note_for(REPORT_ID))
+            .await
+            .expect("downloaded");
+
+        assert_eq!(&bytes[..], b"Payment ID\npay_1\n");
+        assert_eq!(*download_auth_headers.lock().expect("lock"), vec![None]);
+    }
+
+    #[tokio::test]
+    async fn a_report_id_not_shaped_like_checkouts_is_never_requested() {
+        // Nothing listens on this origin, so any request made would fail differently.
+        let creds = creds_for("http://127.0.0.1:9");
+        let err = CheckoutReportSource
+            .download_report(&creds, &note_for("rpt_unexpected-shape"))
+            .await
+            .expect_err("refused");
+        assert!(
+            matches!(err, IngestError::Download(msg) if msg.contains("not a Checkout report id"))
+        );
     }
 }
