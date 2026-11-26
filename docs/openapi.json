@@ -10839,7 +10839,6 @@
         "additionalProperties": false,
         "required": [
           "status",
-          "algorithm",
           "matched_rule",
           "output",
           "selected",
@@ -10853,26 +10852,6 @@
               "default_selection",
               "no_active_rule"
             ]
-          },
-          "algorithm": {
-            "type": [
-              "object",
-              "null"
-            ],
-            "additionalProperties": false,
-            "required": [
-              "id",
-              "name"
-            ],
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "name": {
-                "type": "string"
-              }
-            },
-            "description": "The active algorithm that was evaluated, as `/routing/list` names it; null when the merchant has none."
           },
           "matched_rule": {
             "type": [

@@ -20,7 +20,7 @@ use crate::decider::gatewaydecider::volume_commitment::nudge::{
     BlockedCommitment, SteerBlock, VolumeSteerInfo, VolumeSteerOutcome,
 };
 use crate::decider::network_decider::types::DebitRoutingOutput;
-use crate::euclid::types::{EvaluatedAlgorithm, RoutingEvaluateResponse, RuleSelection};
+use crate::euclid::types::{RoutingEvaluateResponse, RuleSelection};
 use crate::types::routing_evaluation::{RoutingEvaluation, SuccessRateOutcome};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -300,8 +300,6 @@ impl From<RuleSelection> for RuleStatus {
 #[derive(Debug, Serialize)]
 pub struct RuleSection {
     pub status: RuleStatus,
-    /// The active algorithm that was evaluated; null when the merchant has none.
-    pub algorithm: Option<EvaluatedAlgorithm>,
     /// The advanced-algorithm rule whose conditions matched. It stays set when the rule's
     /// connectors were not all eligible, so `outcome.reason` says what became of them. Null for
     /// other algorithm types and when no rule matched.
@@ -326,12 +324,10 @@ impl From<RoutingEvaluateResponse> for RuleSection {
             evaluated_output,
             eligible_connectors,
             selection,
-            algorithm,
             matched_rule,
         } = response;
         Self {
             status: selection.into(),
-            algorithm,
             matched_rule,
             output: rename_connector_ids(output),
             selected: evaluated_output.into_iter().map(Into::into).collect(),
@@ -867,10 +863,6 @@ mod tests {
             evaluated_output: connectors.clone(),
             eligible_connectors: connectors,
             selection,
-            algorithm: Some(EvaluatedAlgorithm {
-                id: "routing_1".to_string(),
-                name: "Cards".to_string(),
-            }),
             matched_rule: (selection == RuleSelection::Matched).then(|| "visa_credit".to_string()),
         }
     }
@@ -922,7 +914,6 @@ mod tests {
         assert_eq!(
             actual["rule"],
             json!({"status": "matched",
-                   "algorithm": {"id": "routing_1", "name": "Cards"},
                    "matched_rule": "visa_credit",
                    "output": {"type": "priority", "connectors": [stripe, adyen]},
                    "selected": [stripe, adyen], "eligible": [stripe, adyen]})

@@ -351,21 +351,11 @@ pub struct RoutingEvaluateResponse {
     /// `default_selection`; `/decide` reports each one by name.
     #[serde(skip)]
     pub selection: RuleSelection,
-    /// The active algorithm that was evaluated; `None` when the merchant has none.
-    #[serde(skip)]
-    pub algorithm: Option<EvaluatedAlgorithm>,
     /// The name of the advanced-algorithm rule whose conditions matched, even when its
     /// connectors were then narrowed to the eligible ones. `None` for other algorithm types and
     /// when no rule matched.
     #[serde(skip)]
     pub matched_rule: Option<String>,
-}
-
-/// The routing algorithm an evaluation ran, as `/routing/list` names it.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct EvaluatedAlgorithm {
-    pub id: String,
-    pub name: String,
 }
 
 /// How the rule layer arrived at its connectors.

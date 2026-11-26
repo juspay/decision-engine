@@ -8,10 +8,10 @@ use crate::{
         pm_filter_graph,
         types::{
             ActivateRoutingConfigRequest, AlgorithmType, Context, DeactivateRoutingConfigRequest,
-            EvaluatedAlgorithm, ExperimentEndpoint, JsonifiedRoutingAlgorithm, KeyDataType,
-            RoutingBatchRequest, RoutingBatchResponse, RoutingDictionaryRecord,
-            RoutingEvaluateResponse, RoutingRequest, RoutingRule, RuleSelection, SrDimensionConfig,
-            StaticRoutingAlgorithm, ELIGIBLE_DIMENSIONS,
+            ExperimentEndpoint, JsonifiedRoutingAlgorithm, KeyDataType, RoutingBatchRequest,
+            RoutingBatchResponse, RoutingDictionaryRecord, RoutingEvaluateResponse, RoutingRequest,
+            RoutingRule, RuleSelection, SrDimensionConfig, StaticRoutingAlgorithm,
+            ELIGIBLE_DIMENSIONS,
         },
         utils::{
             apply_default_fallback, generate_random_id, is_valid_enum_value,
@@ -788,7 +788,6 @@ async fn build_no_active_algorithm_response(
         evaluated_output,
         eligible_connectors,
         selection: RuleSelection::NoActiveAlgorithm,
-        algorithm: None,
         matched_rule: None,
     }
 }
@@ -1134,10 +1133,6 @@ async fn evaluate_algorithm_data(
         evaluated_output,
         eligible_connectors,
         selection,
-        algorithm: Some(EvaluatedAlgorithm {
-            id: algorithm.id.clone(),
-            name: algorithm.name.clone(),
-        }),
         matched_rule,
     };
 
@@ -1658,7 +1653,6 @@ pub async fn routing_evaluate_batch(
                     evaluated_output: Vec::new(),
                     eligible_connectors: Vec::new(),
                     selection: RuleSelection::default(),
-                    algorithm: None,
                     matched_rule: None,
                 });
             }

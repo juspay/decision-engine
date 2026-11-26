@@ -120,8 +120,8 @@ async function trainScores(api: any, merchantId: string, template: DecideRequest
 function expectFieldMapParity(decide: DecideResponse, hybrid: any) {
   const rule = hybrid.static_routing
   if (rule) {
-    // The record does not name the algorithm or the matched rule; the tests assert those directly.
-    const { algorithm: _algorithm, matched_rule: _matchedRule, ...shared } = decide.rule ?? {}
+    // The record does not name the matched rule; the tests assert it directly.
+    const { matched_rule: _matchedRule, ...shared } = decide.rule ?? {}
     expect(shared).toEqual({
       status: RULE_STATUS[rule.status],
       output: renameIds(rule.output),
@@ -218,7 +218,6 @@ test.describe('Decide parity with hybrid (API)', () => {
         const expected = scenario.rule ? ['checkout:mca_checkout', 'stripe:mca_stripe'] : ['adyen:mca_adyen', 'checkout:mca_checkout', 'stripe:mca_stripe']
         expect(candidates(response.body)).toEqual(expected)
         expect(response.body.rule?.status).toBe(scenario.rule ? 'matched' : 'no_active_rule')
-        if (!scenario.rule) expect(response.body.rule?.algorithm).toBeNull()
       } else {
         expect(response.body.outcome).toMatchObject({ type: 'routed', strategy: 'rule', reason: 'rule_matched' })
         expect(response.body.connectors.map(c => c.connector)).toEqual(['checkout', 'stripe'])
@@ -316,9 +315,7 @@ test.describe('Decide contract (API)', () => {
       { connector: selected.gateway_name, merchant_connector_id: selected.gateway_id },
     ])
     expect(response.body.outcome).toMatchObject({ type: 'routed', strategy: 'rule', reason: 'rule_matched' })
-    expect(response.body.rule).toMatchObject({
-      algorithm: { id: created.body.rule_id }, matched_rule: 'Renamed fields',
-    })
+    expect(response.body.rule?.matched_rule).toBe('Renamed fields')
   })
 
   test('routes mandate payments by payment_type as hybrid does', async ({ api, merchant }) => {
@@ -351,8 +348,7 @@ test.describe('Decide contract (API)', () => {
     body.payment_type = null
     const unsent = await api.raw<DecideResponse>('POST', '/decide', { body })
     expect(unsent.body.outcome).toMatchObject({ type: 'fallback', reason: 'no_rule_matched' })
-    // The algorithm was still evaluated; no rule in it matched.
-    expect(unsent.body.rule).toMatchObject({ algorithm: { id: created.body.rule_id }, matched_rule: null })
+    expect(unsent.body.rule?.matched_rule).toBeNull()
   })
 
   for (const enabled of [false, true]) {
@@ -372,7 +368,7 @@ test.describe('Decide contract (API)', () => {
       const hybrid = await api.raw('POST', '/routing/hybrid', { body: legacyRequest(body, merchant.id) })
       expectFieldMapParity(response.body, hybrid.body)
       // Only advanced algorithms have named rules.
-      expect(response.body.rule).toMatchObject({ algorithm: { id: created.body.rule_id }, matched_rule: null })
+      expect(response.body.rule?.matched_rule).toBeNull()
       // With one candidate the decider has nothing to rank and keeps the default order.
       expect(response.body.outcome).toMatchObject(enabled
         ? { type: 'routed', strategy: 'candidate_order', reason: 'decider_default' }
@@ -601,23 +597,22 @@ test.describe('Decide scenarios (API)', () => {
       }],
     }))
     await api.activateRoutingAlgorithm(merchant.id, created.body.rule_id)
-    const algorithm = { id: created.body.rule_id, name: expect.any(String) }
 
     const body = decideRequest()
     body.routing_config.eligible_connectors = [stripe, adyen, checkout]
     let { decide } = await both(api, merchant.id, body)
     expect(decide.outcome.reason).toBe('rule_matched')
-    expect(decide.rule).toMatchObject({ status: 'matched', algorithm, matched_rule: 'Cards to checkout' })
+    expect(decide.rule).toMatchObject({ status: 'matched', matched_rule: 'Cards to checkout' })
 
     body.routing_config.eligible_connectors = [stripe, adyen]
     ;({ decide } = await both(api, merchant.id, body))
     expect(decide.outcome.reason).toBe('rule_output_partially_eligible')
-    expect(decide.rule).toMatchObject({ algorithm, matched_rule: 'Cards to checkout' })
+    expect(decide.rule?.matched_rule).toBe('Cards to checkout')
 
     body.routing_config.eligible_connectors = [adyen]
     ;({ decide } = await both(api, merchant.id, body))
     expect(decide.outcome.reason).toBe('rule_output_not_eligible')
-    expect(decide.rule).toMatchObject({ algorithm, matched_rule: 'Cards to checkout' })
+    expect(decide.rule?.matched_rule).toBe('Cards to checkout')
   })
 
   test('names every invalid value by its own field', async ({ api, merchant }) => {

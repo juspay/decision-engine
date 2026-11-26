@@ -413,8 +413,6 @@ export interface DecideWarning {
 
 export interface DecideRuleSection {
   status: 'matched' | 'default_selection' | 'no_active_rule'
-  // The active algorithm that was evaluated; null when the merchant has none.
-  algorithm: { id: string; name: string } | null
   // The advanced-algorithm rule whose conditions matched; null for other algorithm types and no match.
   matched_rule: string | null
   // The algorithm's output by `type`, with connectors in the DecideConnector shape.
