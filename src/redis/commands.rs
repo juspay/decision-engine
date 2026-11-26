@@ -526,17 +526,25 @@ impl RedisConnectionWrapper {
     }
 
     /// Delete every key matching `pattern` (glob, e.g. `prefix_*`) and return how many
-    /// were removed. Uses a cursor-based `SCAN` (never `KEYS`, which blocks the server)
-    /// and deletes each key individually: in cluster mode each SR key carries its own hash
-    /// tag, so a single multi-key `DEL` could span slots and fail — one at a time stays
-    /// slot-safe. Intended for scoped admin flushes (e.g. clearing one merchant's gateway
-    /// scores), not hot-path use.
+    /// were removed. Uses a cursor-based `SCAN` (never `KEYS`, which blocks the server),
+    /// run on every primary node in cluster mode, since a single `SCAN` only walks one
+    /// node. Deletes each key individually: in cluster mode each SR key carries its own
+    /// hash tag, so a single multi-key `DEL` could span slots and fail — one at a time
+    /// stays slot-safe. Intended for scoped admin flushes (e.g. clearing one merchant's
+    /// gateway scores), not hot-path use.
     pub async fn delete_keys_by_pattern(&self, pattern: &str) -> Result<usize, errors::RedisError> {
+        use fred::interfaces::ClientLike;
         use fred::types::Scanner;
         use futures::stream::StreamExt;
 
         let client = self.conn.pool.next();
-        let mut scan_stream = client.scan(pattern.to_string(), Some(100), None);
+        let mut scan_stream = if client.is_clustered() {
+            client
+                .scan_cluster(pattern.to_string(), Some(100), None)
+                .boxed()
+        } else {
+            client.scan(pattern.to_string(), Some(100), None).boxed()
+        };
         let mut deleted = 0usize;
 
         while let Some(page) = scan_stream.next().await {
@@ -926,5 +934,81 @@ impl RedisConnectionWrapper {
             }
             None => Ok(None),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Run with `REDIS_CLUSTER_URLS=127.0.0.1:7000,127.0.0.1:7001,127.0.0.1:7002`.
+    #[tokio::test]
+    #[ignore = "requires a Redis cluster at REDIS_CLUSTER_URLS"]
+    #[allow(clippy::panic_in_result_fn)]
+    async fn delete_keys_by_pattern_covers_every_cluster_node() -> std::result::Result<(), String> {
+        let urls = std::env::var("REDIS_CLUSTER_URLS")
+            .map_err(|_| "set REDIS_CLUSTER_URLS".to_string())?;
+        let mut nodes = urls.split(',');
+        let (host, port) = nodes
+            .next()
+            .and_then(|seed| seed.split_once(':'))
+            .ok_or("REDIS_CLUSTER_URLS needs host:port entries")?;
+        let settings = redis_interface::RedisSettings {
+            host: host.to_string(),
+            port: port.parse().map_err(|_| "bad port in REDIS_CLUSTER_URLS")?,
+            cluster_enabled: true,
+            cluster_urls: nodes.map(|node| format!("node={node}")).collect(),
+            ..Default::default()
+        };
+        let pool = RedisConnectionPool::new_without_event_emitter(&settings)
+            .await
+            .map_err(|error| error.to_string())?;
+        let redis = RedisConnectionWrapper::new(pool, None);
+
+        // SR keys carry their dimensions inside the hash tag, so one merchant's keys sit in
+        // different hash slots, and so on different nodes.
+        let merchant = format!("reset_test_{}", uuid::Uuid::new_v4().simple());
+        let other_merchant = format!("reset_test_{}", uuid::Uuid::new_v4().simple());
+        let key = |merchant: &str, i: usize| {
+            format!("{{gw_sr_v3_score_{merchant}_ORDER_PAYMENT_CREDIT_CARD_dim{i}_}}score")
+        };
+        let count = 60;
+        for i in 0..count {
+            redis
+                .conn
+                .pool
+                .set::<(), _, _>(key(&merchant, i), "1", None, None, false)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        redis
+            .conn
+            .pool
+            .set::<(), _, _>(key(&other_merchant, 0), "1", None, None, false)
+            .await
+            .map_err(|error| error.to_string())?;
+
+        let deleted = redis
+            .delete_keys_by_pattern(&format!("{{gw_sr_v3_score_{merchant}_*"))
+            .await
+            .map_err(|error| format!("{error:?}"))?;
+
+        assert_eq!(deleted, count);
+        for i in 0..count {
+            assert!(!redis
+                .exists(&key(&merchant, i))
+                .await
+                .map_err(|e| format!("{e:?}"))?);
+        }
+        // Another merchant's scores are kept.
+        assert!(redis
+            .exists(&key(&other_merchant, 0))
+            .await
+            .map_err(|e| format!("{e:?}"))?);
+        redis
+            .delete_key(&key(&other_merchant, 0))
+            .await
+            .map_err(|error| format!("{error:?}"))?;
+        Ok(())
     }
 }
