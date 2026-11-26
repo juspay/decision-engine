@@ -133,6 +133,9 @@ pub struct MeResponse {
     /// DE-native merchants and for profiles that have not been synced.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hierarchy: Option<crate::types::merchant::hierarchy::Hierarchy>,
+    /// Recovery codes the user has left, when they have set up two-factor authentication.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery_codes_remaining: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1239,6 +1242,7 @@ pub async fn me(
             is_super_admin_view: false,
             permissions,
             hierarchy,
+            recovery_codes_remaining: None,
         }));
     }
 
@@ -1257,6 +1261,7 @@ pub async fn me(
         None => fetch_user_merchants(&app_state, &user.user_id).await?,
     };
     let hierarchy = hierarchy_of_scope(&claims.merchant_id).await;
+    let recovery_codes_remaining = crate::routes::two_factor_auth::recovery_codes_remaining(&user);
 
     Ok(Json(MeResponse {
         user_id: user.user_id,
@@ -1273,6 +1278,7 @@ pub async fn me(
         email_verified: user.email_verified != 0,
         #[cfg(feature = "postgres")]
         email_verified: user.email_verified,
+        recovery_codes_remaining,
         merchants,
         hierarchy,
     }))

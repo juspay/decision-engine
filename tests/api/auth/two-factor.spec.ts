@@ -8,7 +8,7 @@ import type { ApiClient } from '../../fixtures/api-client'
  * Users are created on the suite's own server, where two-factor authentication is off — so every user
  * here starts as an existing account does when the requirement is switched on.
  *
- * Each test uses its own user: code replay, attempt counts and the resend interval are all per user,
+ * Each test uses its own user: code replay, attempt counts and the email interval are all per user,
  * so tests sharing one would trip over each other.
  */
 
@@ -82,14 +82,16 @@ class Authenticator {
 
 // ---- Mailpit -------------------------------------------------------------------------------------
 
+const searchEmails = (api: ApiClient, email: string) =>
+  api.raw('GET', `${MAILPIT}/api/v1/search`, {
+    failOnStatusCode: false,
+    qs: { query: `to:"${email}" subject:"two-factor"` },
+  })
+
 /** The token from the newest two-factor verification email sent to `email`. */
 async function emailedLinkToken(api: ApiClient, email: string): Promise<string> {
   const search = await poll(
-    () =>
-      api.raw('GET', `${MAILPIT}/api/v1/search`, {
-        failOnStatusCode: false,
-        qs: { query: `to:"${email}" subject:"two-factor"` },
-      }),
+    () => searchEmails(api, email),
     (r) => r.status === 200 && r.body.messages?.length > 0,
     { message: `no two-factor email reached Mailpit for ${email}`, timeout: 20_000, interval: 500 },
   )
@@ -127,9 +129,7 @@ async function enroll(api: ApiClient, email: string) {
   })
   expect(confirmed.body.next_step).toBe('setup_totp')
   const flow = confirmed.body.flow_token
-
-  const setup = await anon.raw('POST', `${TFA}/auth/2fa/totp/setup`, { body: { flow_token: flow } })
-  const authenticator = new Authenticator(setup.body.secret)
+  const authenticator = new Authenticator(confirmed.body.secret)
   const enabled = await anon.raw('POST', `${TFA}/auth/2fa/totp/enable`, {
     body: { flow_token: flow, totp: authenticator.code() },
   })
@@ -156,44 +156,24 @@ test.describe('Two-factor authentication (API, mode = required)', () => {
     // The flow token is not a session, and holding it — the password — does not reach setup.
     const me = await anon.raw('GET', `${TFA}/auth/me`, { failOnStatusCode: false, headers: bearer(challenge.flow_token) })
     expect(me.status).toBe(401)
-    const early = await anon.raw('POST', `${TFA}/auth/2fa/totp/setup`, {
+    const early = await anon.raw('POST', `${TFA}/auth/2fa/totp/enable`, {
       failOnStatusCode: false,
-      body: { flow_token: challenge.flow_token },
+      body: { flow_token: challenge.flow_token, totp: '000000' },
     })
     expect(early.status).toBe(401)
-
-    // Login already sent the email; another inside the minute is refused.
-    const resend = await anon.raw('POST', `${TFA}/auth/2fa/email/resend`, {
-      failOnStatusCode: false,
-      body: { flow_token: challenge.flow_token },
-    })
-    expect(resend.status).toBe(429)
 
     const link = await emailedLinkToken(api, email)
     const confirmed = await anon.raw('POST', `${TFA}/auth/2fa/email/confirm`, { body: { token: link } })
     expect(confirmed.body.next_step).toBe('setup_totp')
     expect(confirmed.body.flow_token).not.toBe(challenge.flow_token)
+    expect(confirmed.body.otpauth_url).toMatch(/^otpauth:\/\/totp\//)
+    const authenticator = new Authenticator(confirmed.body.secret)
 
-    // The link is single-use, and redeeming it ends the flow that only had the password.
+    // The link is single-use.
     const again = await anon.raw('POST', `${TFA}/auth/2fa/email/confirm`, { failOnStatusCode: false, body: { token: link } })
     expect(again.status).toBe(401)
-    const stale = await anon.raw('POST', `${TFA}/auth/2fa/email/resend`, {
-      failOnStatusCode: false,
-      body: { flow_token: challenge.flow_token },
-    })
-    expect(stale.status).toBe(401)
 
     const flow = confirmed.body.flow_token
-    const notStarted = await anon.raw('POST', `${TFA}/auth/2fa/totp/enable`, {
-      failOnStatusCode: false,
-      body: { flow_token: flow, totp: '000000' },
-    })
-    expect(notStarted.status).toBe(400)
-
-    const setup = await anon.raw('POST', `${TFA}/auth/2fa/totp/setup`, { body: { flow_token: flow } })
-    expect(setup.body.otpauth_url).toMatch(/^otpauth:\/\/totp\//)
-    const authenticator = new Authenticator(setup.body.secret)
-
     const wrong = await anon.raw('POST', `${TFA}/auth/2fa/totp/enable`, {
       failOnStatusCode: false,
       body: { flow_token: flow, totp: authenticator.wrongCode() },
@@ -205,10 +185,30 @@ test.describe('Two-factor authentication (API, mode = required)', () => {
     })
     expect(enabled.body.recovery_codes).toHaveLength(8)
     const session = enabled.body.session.token
-    expect((await anon.raw('GET', `${TFA}/auth/me`, { headers: bearer(session) })).body.email).toBe(email)
+    const signedIn = await anon.raw('GET', `${TFA}/auth/me`, { headers: bearer(session) })
+    expect(signedIn.body.email).toBe(email)
+    expect(signedIn.body.recovery_codes_remaining).toBe(8)
+  })
 
-    const status = await anon.raw('GET', `${TFA}/auth/2fa/status`, { headers: bearer(session) })
-    expect(status.body).toEqual({ mode: 'required', enrolled: true, recovery_codes_remaining: 8 })
+  test('signing in again is how a new link is sent, at most once a minute', async ({ api }) => {
+    const email = await existingUser(api)
+    const anon = api.anonymous()
+
+    const first = await login(api, email)
+    await emailedLinkToken(api, email)
+
+    // A second login inside the minute is still held at the email step, but sends nothing more.
+    const second = await login(api, email)
+    expect(second.next_step).toBe('verify_email')
+    expect(second.flow_token).not.toBe(first.flow_token)
+    await new Promise((resolve) => setTimeout(resolve, 2_000))
+    expect((await searchEmails(api, email)).body.messages).toHaveLength(1)
+
+    // The link that did go out still continues to setup.
+    const confirmed = await anon.raw('POST', `${TFA}/auth/2fa/email/confirm`, {
+      body: { token: await emailedLinkToken(api, email) },
+    })
+    expect(confirmed.body.next_step).toBe('setup_totp')
   })
 
   test('signup returns a challenge instead of a session', async ({ api }) => {
@@ -229,20 +229,20 @@ test.describe('Two-factor authentication (API, mode = required)', () => {
     expect(challenge.next_step).toBe('verify_totp')
 
     const code = authenticator.code()
-    const signedIn = await anon.raw('POST', `${TFA}/auth/2fa/totp/verify`, {
+    const signedIn = await anon.raw('POST', `${TFA}/auth/2fa/verify`, {
       body: { flow_token: challenge.flow_token, totp: code },
     })
     expect(signedIn.body.token).toBeTruthy()
     expect(signedIn.body.email).toBe(email)
 
-    const reusedFlow = await anon.raw('POST', `${TFA}/auth/2fa/totp/verify`, {
+    const reusedFlow = await anon.raw('POST', `${TFA}/auth/2fa/verify`, {
       failOnStatusCode: false,
       body: { flow_token: challenge.flow_token, totp: authenticator.code() },
     })
     expect(reusedFlow.status).toBe(401)
 
     const next = await login(api, email)
-    const replayed = await anon.raw('POST', `${TFA}/auth/2fa/totp/verify`, {
+    const replayed = await anon.raw('POST', `${TFA}/auth/2fa/verify`, {
       failOnStatusCode: false,
       body: { flow_token: next.flow_token, totp: code },
     })
@@ -255,33 +255,34 @@ test.describe('Two-factor authentication (API, mode = required)', () => {
     const anon = api.anonymous()
 
     const first = await login(api, email)
-    const signedIn = await anon.raw('POST', `${TFA}/auth/2fa/recovery-code/verify`, {
+    const signedIn = await anon.raw('POST', `${TFA}/auth/2fa/verify`, {
       body: { flow_token: first.flow_token, recovery_code: recoveryCodes[0].toUpperCase() },
     })
     expect(signedIn.body.token).toBeTruthy()
 
     const second = await login(api, email)
-    const reused = await anon.raw('POST', `${TFA}/auth/2fa/recovery-code/verify`, {
+    const reused = await anon.raw('POST', `${TFA}/auth/2fa/verify`, {
       failOnStatusCode: false,
       body: { flow_token: second.flow_token, recovery_code: recoveryCodes[0] },
     })
     expect(reused.status).toBe(401)
 
-    const status = await anon.raw('GET', `${TFA}/auth/2fa/status`, { headers: bearer(session) })
-    expect(status.body.recovery_codes_remaining).toBe(7)
+    const me = await anon.raw('GET', `${TFA}/auth/me`, { headers: bearer(session) })
+    expect(me.body.recovery_codes_remaining).toBe(7)
   })
 
-  test('a signed-in user replaces recovery codes, but cannot turn 2FA off or enrol twice', async ({ api }) => {
+  test('a signed-in user replaces recovery codes with an app code, and the old set stops working', async ({ api }) => {
     const email = await existingUser(api)
     const { authenticator, recoveryCodes, session } = await enroll(api, email)
     const anon = api.anonymous()
 
-    const disable = await anon.raw('POST', `${TFA}/auth/2fa/disable`, {
+    const noFactor = await anon.raw('POST', `${TFA}/auth/2fa/recovery-codes`, {
       failOnStatusCode: false,
       headers: bearer(session),
-      body: { totp: authenticator.code() },
+      body: {},
     })
-    expect(disable.status).toBe(403)
+    expect(noFactor.status).toBeGreaterThanOrEqual(400)
+    expect(noFactor.status).toBeLessThan(500)
 
     const regenerated = await anon.raw('POST', `${TFA}/auth/2fa/recovery-codes`, {
       headers: bearer(session),
@@ -289,16 +290,43 @@ test.describe('Two-factor authentication (API, mode = required)', () => {
     })
     expect(regenerated.body.recovery_codes).toHaveLength(8)
 
-    // The old set stops working.
     const challenge = await login(api, email)
-    const old = await anon.raw('POST', `${TFA}/auth/2fa/recovery-code/verify`, {
+    const old = await anon.raw('POST', `${TFA}/auth/2fa/verify`, {
       failOnStatusCode: false,
       body: { flow_token: challenge.flow_token, recovery_code: recoveryCodes[1] },
     })
     expect(old.status).toBe(401)
+    const fresh = await anon.raw('POST', `${TFA}/auth/2fa/verify`, {
+      body: { flow_token: challenge.flow_token, recovery_code: regenerated.body.recovery_codes[0] },
+    })
+    expect(fresh.body.token).toBeTruthy()
+  })
 
-    const enrollAgain = await anon.raw('POST', `${TFA}/auth/2fa/enroll`, { failOnStatusCode: false, headers: bearer(session) })
-    expect(enrollAgain.status).toBe(409)
+  test('a user without their authenticator replaces recovery codes with a recovery code', async ({ api }) => {
+    const email = await existingUser(api)
+    const { recoveryCodes } = await enroll(api, email)
+    const anon = api.anonymous()
+
+    const challenge = await login(api, email)
+    const signedIn = await anon.raw('POST', `${TFA}/auth/2fa/verify`, {
+      body: { flow_token: challenge.flow_token, recovery_code: recoveryCodes[0] },
+    })
+    const session = signedIn.body.token
+
+    const regenerated = await anon.raw('POST', `${TFA}/auth/2fa/recovery-codes`, {
+      headers: bearer(session),
+      body: { recovery_code: recoveryCodes[1] },
+    })
+    expect(regenerated.body.recovery_codes).toHaveLength(8)
+    expect((await anon.raw('GET', `${TFA}/auth/me`, { headers: bearer(session) })).body.recovery_codes_remaining).toBe(8)
+
+    // The code it was replaced with, and the rest of the old set, are spent.
+    const again = await anon.raw('POST', `${TFA}/auth/2fa/recovery-codes`, {
+      failOnStatusCode: false,
+      headers: bearer(session),
+      body: { recovery_code: recoveryCodes[2] },
+    })
+    expect(again.status).toBe(401)
   })
 
   test('wrong codes are limited, and the limit holds even for a right one', async ({ api }) => {
@@ -309,7 +337,7 @@ test.describe('Two-factor authentication (API, mode = required)', () => {
 
     const statuses: number[] = []
     for (let i = 0; i < 6; i++) {
-      const r = await anon.raw('POST', `${TFA}/auth/2fa/totp/verify`, {
+      const r = await anon.raw('POST', `${TFA}/auth/2fa/verify`, {
         failOnStatusCode: false,
         body: { flow_token: challenge.flow_token, totp: authenticator.wrongCode() },
       })
@@ -317,7 +345,7 @@ test.describe('Two-factor authentication (API, mode = required)', () => {
     }
     expect(statuses).toEqual([401, 401, 401, 401, 401, 429])
 
-    const right = await anon.raw('POST', `${TFA}/auth/2fa/totp/verify`, {
+    const right = await anon.raw('POST', `${TFA}/auth/2fa/verify`, {
       failOnStatusCode: false,
       body: { flow_token: challenge.flow_token, totp: authenticator.code() },
     })

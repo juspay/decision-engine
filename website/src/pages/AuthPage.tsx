@@ -99,6 +99,8 @@ export function AuthPage() {
     Boolean(locationState?.focusPassword),
   )
   const [challenge, setChallenge] = useState<TwoFactorChallenge | null>(null)
+  // Kept only while the email step is open: signing in again is how a new link is sent.
+  const resendCredentials = useRef<{ email: string; password: string } | null>(null)
 
   useEffect(() => {
     // A two-factor step that ends in a session navigates on its own, once any merchant is created.
@@ -171,6 +173,7 @@ export function AuthPage() {
         // The merchant is created once sign-in finishes, which may be in another tab opened from
         // the verification email.
         if (normalizedMerchantName) rememberPendingMerchantName(email, normalizedMerchantName)
+        resendCredentials.current = res.next_step === 'verify_email' ? { email, password } : null
         setPassword('')
         setChallenge(res)
         return
@@ -270,8 +273,18 @@ export function AuthPage() {
                 challenge={challenge}
                 onAuthenticated={(session) => completeSignIn(session)}
                 onCancel={() => {
+                  resendCredentials.current = null
                   setChallenge(null)
                   setError(null)
+                }}
+                onResendEmail={async () => {
+                  const credentials = resendCredentials.current
+                  if (!credentials) return
+                  const res = await apiFetch<SignupResponse>('/auth/login', {
+                    method: 'POST',
+                    body: JSON.stringify(credentials),
+                  })
+                  if (isTwoFactorChallenge(res)) setChallenge(res)
                 }}
               />
             ) : (

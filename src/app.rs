@@ -757,45 +757,21 @@ fn public_routes() -> axum::Router<Arc<GlobalAppState>> {
         )
         // Two-factor sign-in steps, authenticated by the flow token in the body.
         .route(
-            "/auth/2fa/email/resend",
-            metered!(post, routes::two_factor_auth::resend_email),
-        )
-        .route(
             "/auth/2fa/email/confirm",
             metered!(post, routes::two_factor_auth::confirm_email),
-        )
-        .route(
-            "/auth/2fa/totp/setup",
-            metered!(post, routes::two_factor_auth::setup_totp),
         )
         .route(
             "/auth/2fa/totp/enable",
             metered!(post, routes::two_factor_auth::enable_totp),
         )
         .route(
-            "/auth/2fa/totp/verify",
-            metered!(post, routes::two_factor_auth::verify_totp),
+            "/auth/2fa/verify",
+            metered!(post, routes::two_factor_auth::verify),
         )
-        .route(
-            "/auth/2fa/recovery-code/verify",
-            metered!(post, routes::two_factor_auth::verify_recovery_code),
-        )
-        // Two-factor account management, authenticated by the user's own session.
-        .route(
-            "/auth/2fa/status",
-            metered!(get, routes::two_factor_auth::status),
-        )
-        .route(
-            "/auth/2fa/enroll",
-            metered!(post, routes::two_factor_auth::enroll),
-        )
+        // Authenticated by the user's own session.
         .route(
             "/auth/2fa/recovery-codes",
             metered!(post, routes::two_factor_auth::regenerate_recovery_codes),
-        )
-        .route(
-            "/auth/2fa/disable",
-            metered!(post, routes::two_factor_auth::disable),
         )
 }
 

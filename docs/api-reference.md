@@ -23,7 +23,7 @@ For advanced rule examples — AND, OR, nested AND+OR, `volume_split_priority`, 
 | Class | Routes | Authentication |
 | --- | --- | --- |
 | Public | `GET /health`, `GET /health/ready`, `GET /health/diagnostics`, `POST /auth/signup`, `POST /auth/login` | None |
-| Two-factor sign-in | `POST /auth/2fa/email/resend`, `/auth/2fa/email/confirm`, `/auth/2fa/totp/setup`, `/auth/2fa/totp/enable`, `/auth/2fa/totp/verify`, `/auth/2fa/recovery-code/verify` | The `flow_token` a login returned (or, for `email/confirm`, the emailed link's token) in the body. Not a session; see `user_auth.two_factor_auth` in [configuration.md](configuration.md) |
+| Two-factor sign-in | `POST /auth/2fa/email/confirm`, `/auth/2fa/totp/enable`, `/auth/2fa/verify` | The `flow_token` a login returned (or, for `email/confirm`, the emailed link's token) in the body. Not a session; see `user_auth.two_factor_auth` in [configuration.md](configuration.md) |
 | Admin bootstrap | `POST /merchant-account/create` | Admin secret |
 | Protected | All routing, decision, score update, rule config, API key, merchant read/delete, analytics, audit, config, and authenticated auth routes | `Authorization: Bearer <jwt_token>` or `x-api-key: <api_key>` |
 | Sandbox | Any Decision Engine route served through `https://sandbox.hyperswitch.io` | Same auth rules plus `x-feature: decision-engine` |

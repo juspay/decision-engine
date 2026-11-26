@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { ArrowRight, Download, KeyRound, Loader2, MailCheck, ShieldCheck } from 'lucide-react'
 import { apiErrorMessage, apiFetch } from '../../lib/api'
@@ -15,6 +15,9 @@ export interface TwoFactorChallenge {
   flow_token: string
   next_step: TwoFactorStep
   email: string
+  /** Present at `setup_totp`: the secret to scan, as a key and as an `otpauth://` URI. */
+  secret?: string
+  otpauth_url?: string
 }
 
 export function isTwoFactorChallenge(value: unknown): value is TwoFactorChallenge {
@@ -25,15 +28,13 @@ export function isTwoFactorChallenge(value: unknown): value is TwoFactorChalleng
   )
 }
 
-interface TotpSetup {
-  secret: string
-  otpauth_url: string
-}
-
 interface TotpEnabled {
   recovery_codes: string[]
   session: AuthResponse
 }
+
+/** Seconds the backend waits between verification emails to one user. */
+const EMAIL_RESEND_INTERVAL_SECONDS = 60
 
 const SECONDARY_LINK =
   'text-sm font-medium text-brand-600 transition-colors hover:text-brand-700 disabled:opacity-50 dark:text-brand-500 dark:hover:text-brand-100'
@@ -41,15 +42,19 @@ const SECONDARY_LINK =
 /**
  * The second half of sign-in: whichever step the backend holds this login at, through to a
  * session. `onAuthenticated` receives that session; `onCancel` returns to the password screen.
+ * `onResendEmail` signs in again, which sends a new verification link; without it the email step
+ * offers no resend.
  */
 export function TwoFactorFlow({
   challenge,
   onAuthenticated,
   onCancel,
+  onResendEmail,
 }: {
   challenge: TwoFactorChallenge
   onAuthenticated: (session: AuthResponse) => Promise<void> | void
   onCancel: () => void
+  onResendEmail?: () => Promise<void>
 }) {
   switch (challenge.next_step) {
     case 'verify_totp':
@@ -57,7 +62,7 @@ export function TwoFactorFlow({
         <VerifyCodeStep challenge={challenge} onAuthenticated={onAuthenticated} onCancel={onCancel} />
       )
     case 'verify_email':
-      return <VerifyEmailStep challenge={challenge} onCancel={onCancel} />
+      return <VerifyEmailStep challenge={challenge} onCancel={onCancel} onResend={onResendEmail} />
     case 'setup_totp':
       return <SetupStep challenge={challenge} onAuthenticated={onAuthenticated} />
   }
@@ -138,17 +143,14 @@ function VerifyCodeStep({
     setError(null)
     setLoading(true)
     try {
-      const session = await apiFetch<AuthResponse>(
-        useRecovery ? '/auth/2fa/recovery-code/verify' : '/auth/2fa/totp/verify',
-        {
-          method: 'POST',
-          body: JSON.stringify(
-            useRecovery
-              ? { flow_token: challenge.flow_token, recovery_code: code }
-              : { flow_token: challenge.flow_token, totp: code },
-          ),
-        },
-      )
+      const session = await apiFetch<AuthResponse>('/auth/2fa/verify', {
+        method: 'POST',
+        body: JSON.stringify(
+          useRecovery
+            ? { flow_token: challenge.flow_token, recovery_code: code }
+            : { flow_token: challenge.flow_token, totp: code },
+        ),
+      })
       await onAuthenticated(session)
     } catch (err) {
       setError(apiErrorMessage(err))
@@ -194,24 +196,34 @@ function VerifyCodeStep({
 function VerifyEmailStep({
   challenge,
   onCancel,
+  onResend,
 }: {
   challenge: TwoFactorChallenge
   onCancel: () => void
+  onResend?: () => Promise<void>
 }) {
+  // The backend sends at most one email a minute and does not say when it skipped one, so the
+  // button waits out the interval from the last send instead.
+  const [waitSeconds, setWaitSeconds] = useState(EMAIL_RESEND_INTERVAL_SECONDS)
   const [sending, setSending] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  useEffect(() => {
+    if (waitSeconds <= 0) return
+    const timer = setTimeout(() => setWaitSeconds((seconds) => seconds - 1), 1000)
+    return () => clearTimeout(timer)
+  }, [waitSeconds])
+
   async function resend() {
+    if (!onResend) return
     setError(null)
     setNotice(null)
     setSending(true)
     try {
-      const res = await apiFetch<{ message: string }>('/auth/2fa/email/resend', {
-        method: 'POST',
-        body: JSON.stringify({ flow_token: challenge.flow_token }),
-      })
-      setNotice(res.message)
+      await onResend()
+      setNotice(`We sent a new link to ${challenge.email}. Use the newest email.`)
+      setWaitSeconds(EMAIL_RESEND_INTERVAL_SECONDS)
     } catch (err) {
       setError(apiErrorMessage(err))
     } finally {
@@ -236,9 +248,20 @@ function VerifyEmailStep({
         <button type="button" onClick={onCancel} className={SECONDARY_LINK}>
           Back to sign in
         </button>
-        <button type="button" onClick={resend} disabled={sending} className={SECONDARY_LINK}>
-          {sending ? 'Sending…' : 'Resend email'}
-        </button>
+        {onResend ? (
+          <button
+            type="button"
+            onClick={resend}
+            disabled={sending || waitSeconds > 0}
+            className={SECONDARY_LINK}
+          >
+            {sending
+              ? 'Sending…'
+              : waitSeconds > 0
+                ? `Resend email in ${waitSeconds}s`
+                : 'Resend email'}
+          </button>
+        ) : null}
       </div>
     </div>
   )
@@ -251,25 +274,11 @@ function SetupStep({
   challenge: TwoFactorChallenge
   onAuthenticated: (session: AuthResponse) => Promise<void> | void
 }) {
-  const [setup, setSetup] = useState<TotpSetup | null>(null)
   const [enabled, setEnabled] = useState<TotpEnabled | null>(null)
   const [code, setCode] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const requested = useRef(false)
-
-  useEffect(() => {
-    // Each call replaces the secret, so a re-render must not ask twice and invalidate the QR code
-    // the user is already scanning.
-    if (requested.current) return
-    requested.current = true
-    apiFetch<TotpSetup>('/auth/2fa/totp/setup', {
-      method: 'POST',
-      body: JSON.stringify({ flow_token: challenge.flow_token }),
-    })
-      .then(setSetup)
-      .catch((err: unknown) => setError(apiErrorMessage(err)))
-  }, [challenge.flow_token])
+  const { secret, otpauth_url: otpauthUrl } = challenge
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -305,27 +314,23 @@ function SetupStep({
         Scan this QR code with an authenticator app (Google Authenticator, 1Password, Authy…), then
         enter the 6-digit code it shows.
       </StepHeading>
-      {setup ? (
+      {secret && otpauthUrl ? (
         <div className="space-y-4">
           <div className="mx-auto w-fit rounded-2xl border border-slate-200 bg-white p-4 dark:border-[#2a303a]">
-            <QRCodeSVG value={setup.otpauth_url} size={176} marginSize={0} />
+            <QRCodeSVG value={otpauthUrl} size={176} marginSize={0} />
           </div>
           <div className="text-center text-xs text-slate-500 dark:text-[#8a94a7]">
             Can't scan? Enter this key manually:
             <div className="mt-1 flex items-center justify-center gap-2 font-mono text-sm text-slate-800 dark:text-slate-200">
-              <span className="break-all">{setup.secret}</span>
-              <CopyButton text={setup.secret} label="Copy setup key" size={14} />
+              <span className="break-all">{secret}</span>
+              <CopyButton text={secret} label="Copy setup key" size={14} />
             </div>
           </div>
-        </div>
-      ) : !error ? (
-        <div className="flex justify-center py-10">
-          <Loader2 size={24} className="animate-spin text-brand-600" />
         </div>
       ) : null}
       <CodeInput value={code} onChange={setCode} />
       <ErrorMessage error={error} />
-      <SubmitButton loading={loading || !setup}>
+      <SubmitButton loading={loading || !secret}>
         Turn on two-factor authentication
         <ArrowRight size={16} />
       </SubmitButton>

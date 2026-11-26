@@ -6,15 +6,17 @@
 //! so holding one never authorizes anything but the step it names.
 //!
 //! The steps:
-//! - `verify_totp`: an enrolled user enters a code from their app, or a recovery code.
-//! - `verify_email`: a user who has not enrolled is sent a link. Opening it is the only way to reach
-//!   setup, and setup continues in the browser that opened it — so enrolling takes the password
-//!   (to start the flow) and the mailbox (to continue it). This is the re-verification every
-//!   existing user goes through when two-factor authentication becomes required.
-//! - `setup_totp`: the user scans a new secret, confirms one code, and receives recovery codes.
+//! - `verify_email`: a user who has not enrolled is sent a link. Opening it (`email/confirm`) is the
+//!   only way to reach setup, and setup continues in the browser that opened it — so enrolling
+//!   takes the password (to start the flow) and the mailbox (to continue it). This is the
+//!   re-verification every existing user goes through when two-factor authentication becomes
+//!   required. Signing in again sends a new link.
+//! - `setup_totp`: the user scans the secret `email/confirm` returned, confirms one code
+//!   (`totp/enable`), and receives recovery codes with their session.
+//! - `verify_totp`: an enrolled user enters a code from their app or a recovery code (`verify`).
 //!
-//! Signed-in users manage their enrolment from the account page through the `/auth/2fa/*` routes
-//! that take a session; enrolling from there starts at `verify_email` too.
+//! A signed-in user can replace their recovery codes (`recovery-codes`); `/auth/me` reports how
+//! many are left.
 
 use axum::http::HeaderMap;
 use diesel::{BoolExpressionMethods, ExpressionMethods};
@@ -29,7 +31,7 @@ use crate::custom_extractors::Json;
 use crate::error::{ContainerError, ResultContainerExt, UserAuthError};
 use crate::generics::Repository;
 use crate::routes::user_auth::{
-    extract_bearer_token, issue_session, verify_jwt_not_revoked, AuthResponse, MessageResponse,
+    extract_bearer_token, issue_session, verify_jwt_not_revoked, AuthResponse,
 };
 use crate::storage::backend::schema::users::dsl;
 use crate::storage::types::{User, UserEmailVerifiedUpdate, UserTwoFactorUpdate};
@@ -80,11 +82,6 @@ pub struct TwoFactorChallenge {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct FlowTokenRequest {
-    pub flow_token: Secret<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 pub struct ConfirmEmailRequest {
     pub token: Secret<String>,
 }
@@ -95,19 +92,33 @@ pub struct FlowCodeRequest {
     pub totp: Secret<String>,
 }
 
+/// A second factor: a code from the authenticator app, or a recovery code, which is used up.
+/// Sent as a `totp` or a `recovery_code` field.
 #[derive(Debug, Serialize, Deserialize)]
-pub struct FlowRecoveryCodeRequest {
+#[serde(rename_all = "snake_case")]
+pub enum SecondFactor {
+    Totp(Secret<String>),
+    RecoveryCode(Secret<String>),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VerifyRequest {
     pub flow_token: Secret<String>,
-    pub recovery_code: Secret<String>,
+    #[serde(flatten)]
+    pub factor: SecondFactor,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct CodeRequest {
-    pub totp: Secret<String>,
+pub struct RegenerateRecoveryCodesRequest {
+    #[serde(flatten)]
+    pub factor: SecondFactor,
 }
 
+/// The `setup_totp` challenge, with the secret to scan.
 #[derive(Debug, Serialize)]
-pub struct TotpSetupResponse {
+pub struct TotpSetupChallenge {
+    #[serde(flatten)]
+    pub challenge: TwoFactorChallenge,
     pub secret: Secret<String>,
     /// `otpauth://` URI for the authenticator app; the dashboard renders it as a QR code.
     pub otpauth_url: Secret<String>,
@@ -123,13 +134,6 @@ pub struct RecoveryCodesResponse {
 pub struct TotpEnabledResponse {
     pub recovery_codes: Vec<Secret<String>>,
     pub session: AuthResponse,
-}
-
-#[derive(Debug, Serialize)]
-pub struct TwoFactorStatusResponse {
-    pub mode: TwoFactorMode,
-    pub enrolled: bool,
-    pub recovery_codes_remaining: usize,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -152,8 +156,8 @@ pub(crate) async fn login_challenge(
 
     let challenge = start_flow(app_state, user, step, None).await?;
     if step == TwoFactorStep::VerifyEmail {
-        // The challenge stands without the email: the user can ask for it again from the next
-        // screen, which is also where a recent send is waited out.
+        // The challenge stands without the email: signing in again sends another once the resend
+        // interval has passed.
         if let Err(error) =
             send_verification_email(app_state, global_config, user, challenge.flow_token.peek())
                 .await
@@ -168,11 +172,11 @@ pub(crate) async fn login_challenge(
 }
 
 /// The first step a password login is held at, or `None` when the password is enough. Off means
-/// off even for an enrolled user; otherwise an enrolled user is always asked for a code.
+/// off even for an enrolled user.
 fn login_step(mode: TwoFactorMode, enrolled: bool) -> Option<TwoFactorStep> {
     match (mode, enrolled) {
-        (TwoFactorMode::Off, _) | (TwoFactorMode::Optional, false) => None,
-        (_, true) => Some(TwoFactorStep::VerifyTotp),
+        (TwoFactorMode::Off, _) => None,
+        (TwoFactorMode::Required, true) => Some(TwoFactorStep::VerifyTotp),
         (TwoFactorMode::Required, false) => Some(TwoFactorStep::VerifyEmail),
     }
 }
@@ -181,33 +185,12 @@ fn login_step(mode: TwoFactorMode, enrolled: bool) -> Option<TwoFactorStep> {
 // Sign-in flow (authenticated by the flow token)
 // ---------------------------------------------------------------------------------------------
 
-/// Sends the verification link again for a flow waiting on it.
-#[axum::debug_handler]
-pub async fn resend_email(Json(payload): Json<FlowTokenRequest>) -> Result<Json<MessageResponse>> {
-    let global_config = global_config()?;
-    enabled_keys(&global_config)?;
-    let app_state = get_tenant_app_state().await;
-
-    let flow = load_flow(
-        &app_state,
-        payload.flow_token.peek(),
-        TwoFactorStep::VerifyEmail,
-    )
-    .await?;
-    let user = load_user(&app_state, &flow.user_id).await?;
-    send_verification_email(&app_state, &global_config, &user, payload.flow_token.peek()).await?;
-
-    Ok(Json(MessageResponse {
-        message: format!("We sent a verification link to {}.", user.email),
-    }))
-}
-
-/// Redeems the emailed link. The flow that sent it ends here, and a new one at `setup_totp` is
-/// handed to whoever opened the link.
+/// Redeems the emailed link. The flow that sent it ends here, and whoever opened the link gets a
+/// new one at `setup_totp`, together with the secret to scan.
 #[axum::debug_handler]
 pub async fn confirm_email(
     Json(payload): Json<ConfirmEmailRequest>,
-) -> Result<Json<TwoFactorChallenge>> {
+) -> Result<Json<TotpSetupChallenge>> {
     let global_config = global_config()?;
     enabled_keys(&global_config)?;
     let app_state = get_tenant_app_state().await;
@@ -252,45 +235,19 @@ pub async fn confirm_email(
     .await
     .change_context(UserAuthError::StorageError)?;
 
-    let challenge = start_flow(&app_state, &user, TwoFactorStep::SetupTotp, None).await?;
-    Ok(Json(challenge))
-}
-
-/// Generates the secret to scan. Calling it again replaces the secret, so a user who lost the
-/// first QR code can start over within the same flow.
-#[axum::debug_handler]
-pub async fn setup_totp(Json(payload): Json<FlowTokenRequest>) -> Result<Json<TotpSetupResponse>> {
-    let global_config = global_config()?;
-    enabled_keys(&global_config)?;
-    let app_state = get_tenant_app_state().await;
-
-    let flow = load_flow(
-        &app_state,
-        payload.flow_token.peek(),
-        TwoFactorStep::SetupTotp,
-    )
-    .await?;
-    let user = load_user(&app_state, &flow.user_id).await?;
-    if user.totp_secret.is_some() {
-        return Err(UserAuthError::TwoFactorAlreadyEnrolled.into());
-    }
-
     let totp = two_factor::totp(None, issuer(&global_config), &user.email)
         .change_context(UserAuthError::StorageError)?;
     let secret = totp.get_secret_base32();
-
-    write_flow(
+    let challenge = start_flow(
         &app_state,
-        payload.flow_token.peek(),
-        &FlowEntry {
-            user_id: user.user_id,
-            step: TwoFactorStep::SetupTotp,
-            pending_secret: Some(Secret::new(secret.clone())),
-        },
+        &user,
+        TwoFactorStep::SetupTotp,
+        Some(Secret::new(secret.clone())),
     )
     .await?;
 
-    Ok(Json(TotpSetupResponse {
+    Ok(Json(TotpSetupChallenge {
+        challenge,
         secret: Secret::new(secret),
         otpauth_url: Secret::new(totp.get_url()),
     }))
@@ -313,7 +270,7 @@ pub async fn enable_totp(
     .await?;
     let pending_secret = flow
         .pending_secret
-        .ok_or(UserAuthError::TwoFactorSetupNotStarted)?;
+        .ok_or(UserAuthError::InvalidTwoFactorFlow)?;
     let user = load_user(&app_state, &flow.user_id).await?;
 
     take_attempt(&app_state, &user.user_id).await?;
@@ -370,9 +327,9 @@ pub async fn enable_totp(
     }))
 }
 
-/// Finishes sign-in with a code from the authenticator app.
+/// Finishes sign-in with a code from the authenticator app or a recovery code.
 #[axum::debug_handler]
-pub async fn verify_totp(Json(payload): Json<FlowCodeRequest>) -> Result<Json<AuthResponse>> {
+pub async fn verify(Json(payload): Json<VerifyRequest>) -> Result<Json<AuthResponse>> {
     let global_config = global_config()?;
     let keys = enabled_keys(&global_config)?;
     let app_state = get_tenant_app_state().await;
@@ -385,199 +342,63 @@ pub async fn verify_totp(Json(payload): Json<FlowCodeRequest>) -> Result<Json<Au
     .await?;
     let user = load_user(&app_state, &flow.user_id).await?;
 
-    check_totp(
-        &app_state,
-        &global_config,
-        &keys,
-        &user,
-        payload.totp.peek(),
-    )
-    .await?;
+    match &payload.factor {
+        SecondFactor::Totp(code) => {
+            check_totp(&app_state, &global_config, &keys, &user, code.peek()).await?
+        }
+        SecondFactor::RecoveryCode(code) => {
+            spend_recovery_code(&app_state, &keys, &user, code.peek(), None).await?
+        }
+    }
     claim_flow(&app_state, payload.flow_token.peek()).await?;
 
     Ok(Json(issue_session(&app_state, &global_config, user).await?))
 }
 
-/// Finishes sign-in with a recovery code, which is used up.
-#[axum::debug_handler]
-pub async fn verify_recovery_code(
-    Json(payload): Json<FlowRecoveryCodeRequest>,
-) -> Result<Json<AuthResponse>> {
-    let global_config = global_config()?;
-    let keys = enabled_keys(&global_config)?;
-    let app_state = get_tenant_app_state().await;
-
-    let flow = load_flow(
-        &app_state,
-        payload.flow_token.peek(),
-        TwoFactorStep::VerifyTotp,
-    )
-    .await?;
-    let user = load_user(&app_state, &flow.user_id).await?;
-
-    take_attempt(&app_state, &user.user_id).await?;
-    let stored_json = user
-        .totp_recovery_codes
-        .clone()
-        .ok_or(UserAuthError::TwoFactorNotEnrolled)?;
-    let mut stored: Vec<String> =
-        serde_json::from_str(&stored_json).change_context(UserAuthError::StorageError)?;
-    let index = keys
-        .match_recovery_code(payload.recovery_code.peek(), &stored)
-        .ok_or(UserAuthError::InvalidTwoFactorCode)?;
-    stored.remove(index);
-    let remaining = serde_json::to_string(&stored).change_context(UserAuthError::StorageError)?;
-
-    // Written only over the list just read, so a code cannot be spent twice by racing requests.
-    let conn = app_state
-        .db
-        .get_conn()
-        .await
-        .change_error(UserAuthError::StorageError)?;
-    let rows = crate::generics::generic_update_if_present::<
-        <User as diesel::associations::HasTable>::Table,
-        UserTwoFactorUpdate,
-        _,
-    >(
-        &conn,
-        dsl::user_id
-            .eq(user.user_id.clone())
-            .and(dsl::totp_recovery_codes.eq(stored_json)),
-        UserTwoFactorUpdate {
-            totp_secret: None,
-            totp_recovery_codes: Some(Some(remaining)),
-        },
-    )
-    .await
-    .change_context(UserAuthError::StorageError)?;
-    if rows == 0 {
-        return Err(UserAuthError::InvalidTwoFactorCode.into());
-    }
-
-    claim_flow(&app_state, payload.flow_token.peek()).await?;
-    clear_attempts(&app_state, &user.user_id).await;
-
-    Ok(Json(issue_session(&app_state, &global_config, user).await?))
-}
-
 // ---------------------------------------------------------------------------------------------
-// Account management (authenticated by a standard session)
+// Account (authenticated by the user's own session)
 // ---------------------------------------------------------------------------------------------
 
-#[axum::debug_handler]
-pub async fn status(headers: HeaderMap) -> Result<Json<TwoFactorStatusResponse>> {
-    let global_config = global_config()?;
-    let app_state = get_tenant_app_state().await;
-    let user = session_user(&app_state, &global_config, &headers).await?;
-
-    let recovery_codes_remaining = match user.totp_recovery_codes.as_deref() {
-        Some(json) => serde_json::from_str::<Vec<String>>(json)
-            .change_context(UserAuthError::StorageError)?
-            .len(),
-        None => 0,
-    };
-
-    Ok(Json(TwoFactorStatusResponse {
-        mode: global_config.user_auth.two_factor_auth.mode,
-        enrolled: user.totp_secret.is_some(),
-        recovery_codes_remaining,
-    }))
-}
-
-/// Starts enrolment for a signed-in user: the verification link goes out, and setup continues
-/// from it exactly as it does during sign-in.
-#[axum::debug_handler]
-pub async fn enroll(headers: HeaderMap) -> Result<Json<TwoFactorChallenge>> {
-    let global_config = global_config()?;
-    enabled_keys(&global_config)?;
-    let app_state = get_tenant_app_state().await;
-    let user = session_user(&app_state, &global_config, &headers).await?;
-    if user.totp_secret.is_some() {
-        return Err(UserAuthError::TwoFactorAlreadyEnrolled.into());
-    }
-
-    let challenge = start_flow(&app_state, &user, TwoFactorStep::VerifyEmail, None).await?;
-    send_verification_email(
-        &app_state,
-        &global_config,
-        &user,
-        challenge.flow_token.peek(),
-    )
-    .await?;
-    Ok(Json(challenge))
-}
-
-/// Replaces every recovery code. Takes a current app code, so a session alone cannot do it.
+/// Replaces every recovery code. Takes a current app code or a recovery code, so a session alone
+/// cannot do it, and a user without their authenticator can still get a fresh set.
 #[axum::debug_handler]
 pub async fn regenerate_recovery_codes(
     headers: HeaderMap,
-    Json(payload): Json<CodeRequest>,
+    Json(payload): Json<RegenerateRecoveryCodesRequest>,
 ) -> Result<Json<RecoveryCodesResponse>> {
     let global_config = global_config()?;
     let keys = enabled_keys(&global_config)?;
     let app_state = get_tenant_app_state().await;
     let user = session_user(&app_state, &global_config, &headers).await?;
 
-    check_totp(
-        &app_state,
-        &global_config,
-        &keys,
-        &user,
-        payload.totp.peek(),
-    )
-    .await?;
-
     let (recovery_codes, digests) = new_recovery_codes(&keys)?;
-    update_two_factor(
-        &app_state,
-        &user.user_id,
-        UserTwoFactorUpdate {
-            totp_secret: None,
-            totp_recovery_codes: Some(Some(digests)),
-        },
-    )
-    .await?;
+    match &payload.factor {
+        SecondFactor::Totp(code) => {
+            check_totp(&app_state, &global_config, &keys, &user, code.peek()).await?;
+            update_two_factor(
+                &app_state,
+                &user.user_id,
+                UserTwoFactorUpdate {
+                    totp_secret: None,
+                    totp_recovery_codes: Some(Some(digests)),
+                },
+            )
+            .await?;
+        }
+        SecondFactor::RecoveryCode(code) => {
+            spend_recovery_code(&app_state, &keys, &user, code.peek(), Some(digests)).await?
+        }
+    }
 
     Ok(Json(RecoveryCodesResponse { recovery_codes }))
 }
 
-/// Removes the authenticator and recovery codes. Refused while two-factor authentication is
-/// required, since the next login would only enrol the user again.
-#[axum::debug_handler]
-pub async fn disable(
-    headers: HeaderMap,
-    Json(payload): Json<CodeRequest>,
-) -> Result<Json<MessageResponse>> {
-    let global_config = global_config()?;
-    let keys = enabled_keys(&global_config)?;
-    if global_config.user_auth.two_factor_auth.mode == TwoFactorMode::Required {
-        return Err(UserAuthError::TwoFactorMandatory.into());
-    }
-    let app_state = get_tenant_app_state().await;
-    let user = session_user(&app_state, &global_config, &headers).await?;
-
-    check_totp(
-        &app_state,
-        &global_config,
-        &keys,
-        &user,
-        payload.totp.peek(),
-    )
-    .await?;
-
-    update_two_factor(
-        &app_state,
-        &user.user_id,
-        UserTwoFactorUpdate {
-            totp_secret: Some(None),
-            totp_recovery_codes: Some(None),
-        },
-    )
-    .await?;
-
-    Ok(Json(MessageResponse {
-        message: "Two-factor authentication turned off.".to_string(),
-    }))
+/// How many recovery codes the user has left, or `None` when they have not enrolled.
+pub(crate) fn recovery_codes_remaining(user: &User) -> Option<usize> {
+    let stored = user.totp_recovery_codes.as_deref()?;
+    serde_json::from_str::<Vec<String>>(stored)
+        .map(|codes| codes.len())
+        .ok()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -834,6 +655,64 @@ async fn check_totp(
     Ok(())
 }
 
+/// Checks a recovery code and uses it up. The stored list becomes `replacement` when given (a new
+/// set), otherwise the list without the code.
+async fn spend_recovery_code(
+    app_state: &TenantAppState,
+    keys: &two_factor::TwoFactorKeys,
+    user: &User,
+    code: &str,
+    replacement: Option<String>,
+) -> Result<()> {
+    let stored_json = user
+        .totp_recovery_codes
+        .clone()
+        .ok_or(UserAuthError::TwoFactorNotEnrolled)?;
+    take_attempt(app_state, &user.user_id).await?;
+
+    let mut stored: Vec<String> =
+        serde_json::from_str(&stored_json).change_context(UserAuthError::StorageError)?;
+    let index = keys
+        .match_recovery_code(code, &stored)
+        .ok_or(UserAuthError::InvalidTwoFactorCode)?;
+    let updated = match replacement {
+        Some(replacement) => replacement,
+        None => {
+            stored.remove(index);
+            serde_json::to_string(&stored).change_context(UserAuthError::StorageError)?
+        }
+    };
+
+    // Written only over the list just read, so a code cannot be spent twice by racing requests.
+    let conn = app_state
+        .db
+        .get_conn()
+        .await
+        .change_error(UserAuthError::StorageError)?;
+    let rows = crate::generics::generic_update_if_present::<
+        <User as diesel::associations::HasTable>::Table,
+        UserTwoFactorUpdate,
+        _,
+    >(
+        &conn,
+        dsl::user_id
+            .eq(user.user_id.clone())
+            .and(dsl::totp_recovery_codes.eq(stored_json)),
+        UserTwoFactorUpdate {
+            totp_secret: None,
+            totp_recovery_codes: Some(Some(updated)),
+        },
+    )
+    .await
+    .change_context(UserAuthError::StorageError)?;
+    if rows == 0 {
+        return Err(UserAuthError::InvalidTwoFactorCode.into());
+    }
+
+    clear_attempts(app_state, &user.user_id).await;
+    Ok(())
+}
+
 /// Fresh recovery codes for the user, and their digests as stored.
 fn new_recovery_codes(keys: &two_factor::TwoFactorKeys) -> Result<(Vec<Secret<String>>, String)> {
     let codes = two_factor::generate_recovery_codes();
@@ -867,11 +746,10 @@ async fn update_two_factor(
 
 // These requests name no payment.
 crate::impl_api_event_payload!(
-    CodeRequest,
     ConfirmEmailRequest,
     FlowCodeRequest,
-    FlowRecoveryCodeRequest,
-    FlowTokenRequest
+    RegenerateRecoveryCodesRequest,
+    VerifyRequest
 );
 
 #[cfg(test)]
@@ -882,11 +760,6 @@ mod tests {
     fn a_login_is_held_only_where_the_mode_asks_for_it() {
         assert_eq!(login_step(TwoFactorMode::Off, false), None);
         assert_eq!(login_step(TwoFactorMode::Off, true), None);
-        assert_eq!(login_step(TwoFactorMode::Optional, false), None);
-        assert_eq!(
-            login_step(TwoFactorMode::Optional, true),
-            Some(TwoFactorStep::VerifyTotp)
-        );
         assert_eq!(
             login_step(TwoFactorMode::Required, true),
             Some(TwoFactorStep::VerifyTotp)
@@ -899,6 +772,22 @@ mod tests {
             login_step(TwoFactorMode::Required, false),
             Some(TwoFactorStep::VerifyEmail)
         );
+    }
+
+    #[test]
+    fn a_second_factor_is_read_from_whichever_field_was_sent() {
+        let by_app: VerifyRequest =
+            serde_json::from_str(r#"{"flow_token":"f","totp":"123456"}"#).expect("parses");
+        assert!(matches!(by_app.factor, SecondFactor::Totp(ref code) if code.peek() == "123456"));
+
+        let by_recovery: RegenerateRecoveryCodesRequest =
+            serde_json::from_str(r#"{"recovery_code":"abcd-efgh"}"#).expect("parses");
+        assert!(matches!(
+            by_recovery.factor,
+            SecondFactor::RecoveryCode(ref code) if code.peek() == "abcd-efgh"
+        ));
+
+        assert!(serde_json::from_str::<VerifyRequest>(r#"{"flow_token":"f"}"#).is_err());
     }
 
     #[test]

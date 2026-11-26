@@ -346,16 +346,12 @@ pub enum UserAuthError {
     TwoFactorAlreadyEnrolled,
     #[error("Two-factor authentication is not set up for this account")]
     TwoFactorNotEnrolled,
-    #[error("Two-factor authentication is required and cannot be turned off")]
-    TwoFactorMandatory,
     #[error("Invalid authentication code")]
     InvalidTwoFactorCode,
     #[error("Too many attempts. Wait a few minutes and try again")]
     TooManyTwoFactorAttempts,
     #[error("This sign-in step has expired or is not available. Sign in again")]
     InvalidTwoFactorFlow,
-    #[error("Start authenticator setup before confirming a code")]
-    TwoFactorSetupNotStarted,
     #[error("An email was sent moments ago. Wait a minute before asking for another")]
     EmailRecentlySent,
 }
@@ -386,10 +382,7 @@ impl axum::response::IntoResponse for UserAuthError {
             Self::InvalidSubMerchantParent => (hyper::StatusCode::BAD_REQUEST, self.to_string()),
             Self::TwoFactorDisabled => (hyper::StatusCode::NOT_FOUND, self.to_string()),
             Self::TwoFactorAlreadyEnrolled => (hyper::StatusCode::CONFLICT, self.to_string()),
-            Self::TwoFactorNotEnrolled | Self::TwoFactorSetupNotStarted => {
-                (hyper::StatusCode::BAD_REQUEST, self.to_string())
-            }
-            Self::TwoFactorMandatory => (hyper::StatusCode::FORBIDDEN, self.to_string()),
+            Self::TwoFactorNotEnrolled => (hyper::StatusCode::BAD_REQUEST, self.to_string()),
             Self::InvalidTwoFactorCode | Self::InvalidTwoFactorFlow => {
                 (hyper::StatusCode::UNAUTHORIZED, self.to_string())
             }

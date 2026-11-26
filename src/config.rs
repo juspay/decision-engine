@@ -234,7 +234,7 @@ pub struct UserAuthConfig {
     pub two_factor_auth: TwoFactorAuthConfig,
 }
 
-/// Whether dashboard users are offered, or required to use, an authenticator app at sign-in.
+/// Whether dashboard users must use an authenticator app at sign-in.
 ///
 /// Sessions handed over from Hyperswitch are not affected: Hyperswitch runs its own second factor
 /// before it hands a user over.
@@ -244,8 +244,6 @@ pub enum TwoFactorMode {
     /// No enrolment and no challenge.
     #[default]
     Off,
-    /// Users may enrol from their account page; those who have are challenged at every login.
-    Optional,
     /// Every password login completes two-factor authentication. A user who has not enrolled is
     /// taken through re-verifying their email and then enrolling before any session is issued.
     Required,
@@ -1377,7 +1375,7 @@ impl GlobalConfig {
             return Err(error_stack::report!(
                 error::ConfigurationError::InvalidConfigurationValueError(
                     "user_auth.two_factor_auth.secret_key must be a hex-encoded 32-byte key when \
-                     two_factor_auth.mode is optional or required"
+                     two_factor_auth.mode is required"
                         .to_string(),
                 )
             ));
@@ -1523,13 +1521,11 @@ mod tests {
         assert_eq!(config.user_auth.two_factor_auth.mode, TwoFactorMode::Off);
 
         config.email.active_email_client = EmailClientChoice::NoEmailClient;
-        for mode in [TwoFactorMode::Optional, TwoFactorMode::Required] {
-            config.user_auth.two_factor_auth.mode = mode;
-            assert!(
-                config.validate().is_err(),
-                "{mode:?} without email must not start"
-            );
-        }
+        config.user_auth.two_factor_auth.mode = TwoFactorMode::Required;
+        assert!(
+            config.validate().is_err(),
+            "required without email must not start"
+        );
 
         config.user_auth.two_factor_auth.mode = TwoFactorMode::Off;
         config.validate().expect("off needs no email backend");
@@ -1546,7 +1542,7 @@ mod tests {
                 .expect("parses");
         assert_eq!(holder.two_factor_auth.mode, TwoFactorMode::Required);
         assert_eq!(holder.two_factor_auth.issuer_name, "Juspay Decision Engine");
-        assert!(toml::from_str::<Holder>("[two_factor_auth]\nmode = \"sometimes\"\n").is_err());
+        assert!(toml::from_str::<Holder>("[two_factor_auth]\nmode = \"optional\"\n").is_err());
     }
 
     #[test]
