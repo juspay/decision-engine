@@ -78,6 +78,198 @@
     }
   ],
   "paths": {
+    "/auth/2fa/email/confirm": {
+      "post": {
+        "operationId": "twoFactorConfirmEmail",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Redeem the 2FA verification link",
+        "description": "Takes the `token` from the emailed link (`/two-factor/verify-email?token=`). Ends the flow that sent it and returns a new one at `setup_totp`, with the secret to scan, so setup continues wherever the link was opened. To send a new link, sign in again (at most one email a minute).",
+        "responses": {
+          "200": {
+            "description": "Email verified; continue at setup_totp",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TotpSetupChallenge"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Flow token or link unknown, expired, already used, or at another step; or the code is wrong."
+          },
+          "429": {
+            "description": "Too many code attempts."
+          },
+          "404": {
+            "description": "Two-factor authentication is off."
+          },
+          "409": {
+            "description": "Already enrolled."
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/2fa/totp/enable": {
+      "post": {
+        "operationId": "twoFactorEnableTotp",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Confirm the authenticator and finish sign-in",
+        "description": "For a flow at `setup_totp`. Confirms a code from the secret `email/confirm` returned, stores it, and returns 8 recovery codes and the session.",
+        "responses": {
+          "200": {
+            "description": "Enrolled and signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TotpEnabledResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Flow token or link unknown, expired, already used, or at another step; or the code is wrong."
+          },
+          "429": {
+            "description": "Too many code attempts."
+          },
+          "404": {
+            "description": "Two-factor authentication is off."
+          },
+          "409": {
+            "description": "Already enrolled."
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlowCodeRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/2fa/verify": {
+      "post": {
+        "operationId": "twoFactorVerify",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Finish sign-in with a second factor",
+        "description": "For a flow at `verify_totp`. Send `totp` (a code from the authenticator app, accepted once) or `recovery_code` (used up).",
+        "responses": {
+          "200": {
+            "description": "Signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Flow token or link unknown, expired, already used, or at another step; or the code is wrong."
+          },
+          "429": {
+            "description": "Too many code attempts."
+          },
+          "404": {
+            "description": "Two-factor authentication is off."
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TwoFactorVerifyRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/2fa/recovery-codes": {
+      "post": {
+        "operationId": "twoFactorRegenerateRecoveryCodes",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Replace recovery codes",
+        "description": "Takes a current authenticator code (`totp`) or one of the current recovery codes (`recovery_code`), so a user without their authenticator can still get a fresh set. All previous codes stop working. Standard sessions only; `GET /auth/me` reports `recovery_codes_remaining`.",
+        "responses": {
+          "200": {
+            "description": "New codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryCodesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Two-factor authentication is not set up for this account."
+          },
+          "401": {
+            "description": "Missing or invalid session, or wrong code."
+          },
+          "403": {
+            "description": "Not a standard session (handed-over or super-admin view)."
+          },
+          "404": {
+            "description": "Two-factor authentication is off."
+          },
+          "429": {
+            "description": "Too many code attempts."
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecondFactor"
+              }
+            }
+          }
+        }
+      }
+    },
     "/analytics/decisions": {
       "get": {
         "operationId": "analyticsDecisions",
@@ -1772,7 +1964,7 @@
           "Auth"
         ],
         "summary": "Login",
-        "description": "Create a dashboard JWT session.",
+        "description": "Create a dashboard JWT session. When two-factor authentication applies to the user (`user_auth.two_factor_auth`), the response is a `TwoFactorChallenge` instead, and the step that completes it issues the session.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -1790,7 +1982,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AuthResponse"
+                  "oneOf": [ { "$ref": "#/components/schemas/AuthResponse" }, { "$ref": "#/components/schemas/TwoFactorChallenge" } ]
                 }
               }
             }
@@ -1923,7 +2115,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AuthResponse"
+                  "oneOf": [ { "$ref": "#/components/schemas/AuthResponse" }, { "$ref": "#/components/schemas/TwoFactorChallenge" } ]
                 }
               }
             }
@@ -5369,6 +5561,153 @@
       }
     },
     "schemas": {
+      "TwoFactorChallenge": {
+        "type": "object",
+        "description": "Returned instead of a session while a second factor is outstanding. `flow_token` authorizes only the step named by `next_step`, expires after 15 minutes, and is not a session token.",
+        "required": [
+          "two_factor_required",
+          "flow_token",
+          "next_step",
+          "email"
+        ],
+        "properties": {
+          "two_factor_required": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "flow_token": {
+            "type": "string"
+          },
+          "next_step": {
+            "type": "string",
+            "enum": [
+              "verify_email",
+              "setup_totp",
+              "verify_totp"
+            ],
+            "description": "`verify_totp`: call `/auth/2fa/verify`. `verify_email`: a link was emailed; setup continues from `/auth/2fa/email/confirm`. `setup_totp`: scan `secret`, then call `/auth/2fa/totp/enable`."
+          },
+          "email": {
+            "type": "string"
+          }
+        }
+      },
+      "TotpSetupChallenge": {
+        "description": "The `setup_totp` challenge, with the secret to scan.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/TwoFactorChallenge"
+          },
+          {
+            "type": "object",
+            "required": [
+              "secret",
+              "otpauth_url"
+            ],
+            "properties": {
+              "secret": {
+                "type": "string",
+                "description": "Base32 secret, for manual entry."
+              },
+              "otpauth_url": {
+                "type": "string",
+                "description": "`otpauth://totp/...` URI to render as a QR code."
+              }
+            }
+          }
+        ]
+      },
+      "FlowCodeRequest": {
+        "type": "object",
+        "required": [
+          "flow_token",
+          "totp"
+        ],
+        "properties": {
+          "flow_token": {
+            "type": "string"
+          },
+          "totp": {
+            "type": "string",
+            "example": "123456"
+          }
+        }
+      },
+      "SecondFactor": {
+        "description": "Exactly one of `totp` or `recovery_code`.",
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "totp"
+            ],
+            "properties": {
+              "totp": {
+                "type": "string",
+                "example": "123456"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "recovery_code"
+            ],
+            "properties": {
+              "recovery_code": {
+                "type": "string",
+                "example": "abcd-efgh"
+              }
+            }
+          }
+        ]
+      },
+      "TwoFactorVerifyRequest": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "flow_token"
+            ],
+            "properties": {
+              "flow_token": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/SecondFactor"
+          }
+        ]
+      },
+      "RecoveryCodesResponse": {
+        "type": "object",
+        "properties": {
+          "recovery_codes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Shown once; only keyed digests are stored."
+          }
+        }
+      },
+      "TotpEnabledResponse": {
+        "type": "object",
+        "properties": {
+          "recovery_codes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "session": {
+            "$ref": "#/components/schemas/AuthResponse"
+          }
+        }
+      },
       "HealthResponse": {
         "type": "object",
         "properties": {
@@ -7479,6 +7818,11 @@
             "items": {
               "$ref": "#/components/schemas/MerchantInfo"
             }
+          },
+          "recovery_codes_remaining": {
+            "type": "integer",
+            "example": 8,
+            "description": "Recovery codes left. Present only for a user who has set up two-factor authentication."
           }
         },
         "description": "`GET /auth/me` does not return a token."

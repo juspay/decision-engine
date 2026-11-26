@@ -4,6 +4,7 @@ import { apiErrorMessage, apiFetch } from '../lib/api'
 import { Card, CardBody, CardHeader } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
+import { TwoFactorSettings } from '../components/auth/TwoFactorSettings'
 
 import { PageHeading } from '../components/ui/PageHeading'
 function getPasswordPolicyError(password: string): string | null {
@@ -104,6 +105,8 @@ export function AccountPage() {
           </form>
         </CardBody>
       </Card>
+
+      <TwoFactorSettings />
     </div>
   )
 }

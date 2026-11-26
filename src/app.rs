@@ -755,6 +755,24 @@ fn public_routes() -> axum::Router<Arc<GlobalAppState>> {
             "/auth/admin/merchant-token/exchange",
             metered!(post, routes::user_auth::exchange_merchant_token),
         )
+        // Two-factor sign-in steps, authenticated by the flow token in the body.
+        .route(
+            "/auth/2fa/email/confirm",
+            metered!(post, routes::two_factor_auth::confirm_email),
+        )
+        .route(
+            "/auth/2fa/totp/enable",
+            metered!(post, routes::two_factor_auth::enable_totp),
+        )
+        .route(
+            "/auth/2fa/verify",
+            metered!(post, routes::two_factor_auth::verify),
+        )
+        // Authenticated by the user's own session.
+        .route(
+            "/auth/2fa/recovery-codes",
+            metered!(post, routes::two_factor_auth::regenerate_recovery_codes),
+        )
 }
 
 pub async fn server_builder(

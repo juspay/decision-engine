@@ -229,6 +229,46 @@ pub struct UserAuthConfig {
     /// answer is cached; a revoked token is refused and never re-admitted. `0` disables the cache.
     #[serde(default)]
     pub jwt_revocation_cache_ttl_ms: u64,
+    /// Two-factor authentication (TOTP) for dashboard password logins.
+    #[serde(default)]
+    pub two_factor_auth: TwoFactorAuthConfig,
+}
+
+/// Whether dashboard users must use an authenticator app at sign-in.
+///
+/// Sessions handed over from Hyperswitch are not affected: Hyperswitch runs its own second factor
+/// before it hands a user over.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TwoFactorMode {
+    /// No enrolment and no challenge.
+    #[default]
+    Off,
+    /// Every password login completes two-factor authentication. A user who has not enrolled is
+    /// taken through re-verifying their email and then enrolling before any session is issued.
+    Required,
+}
+
+#[derive(Clone, serde::Deserialize, Debug)]
+#[serde(default)]
+pub struct TwoFactorAuthConfig {
+    pub mode: TwoFactorMode,
+    /// Shown as the account's issuer in authenticator apps.
+    pub issuer_name: String,
+    /// Hex-encoded 32-byte key. Seals TOTP secrets at rest (AES-256-GCM) and keys the recovery-code
+    /// digests, so it must stay stable: changing it invalidates every enrolment. Required unless
+    /// `mode` is `off`.
+    pub secret_key: masking::Secret<String>,
+}
+
+impl Default for TwoFactorAuthConfig {
+    fn default() -> Self {
+        Self {
+            mode: TwoFactorMode::Off,
+            issuer_name: "Juspay Decision Engine".to_string(),
+            secret_key: String::new().into(),
+        }
+    }
 }
 
 /// Deserialize a `Vec<String>` from either a sequence (TOML array) or a single comma-separated
@@ -329,6 +369,7 @@ impl Default for UserAuthConfig {
             super_admin_emails: Vec::new(),
             require_explicit_permissions: false,
             jwt_revocation_cache_ttl_ms: 0,
+            two_factor_auth: TwoFactorAuthConfig::default(),
         }
     }
 }
@@ -1315,6 +1356,31 @@ impl GlobalConfig {
                 "admin_secret_secret",
             ))?;
 
+        if !self.user_auth.two_factor_auth.secret_key.peek().is_empty() {
+            self.user_auth.two_factor_auth.secret_key = secret_management_client
+                .get_secret(self.user_auth.two_factor_auth.secret_key.clone())
+                .await
+                .change_context(error::ConfigurationError::KmsDecryptError(
+                    "user_auth_two_factor_auth_secret_key",
+                ))?;
+        }
+        // Checked on the decrypted value, so it runs here rather than in `validate`, which sees the
+        // key as configured — possibly still KMS-encrypted.
+        if self.user_auth.two_factor_auth.mode != TwoFactorMode::Off
+            && crate::auth::two_factor::TwoFactorKeys::from_hex(
+                self.user_auth.two_factor_auth.secret_key.peek(),
+            )
+            .is_none()
+        {
+            return Err(error_stack::report!(
+                error::ConfigurationError::InvalidConfigurationValueError(
+                    "user_auth.two_factor_auth.secret_key must be a hex-encoded 32-byte key when \
+                     two_factor_auth.mode is required"
+                        .to_string(),
+                )
+            ));
+        }
+
         for secret in self.cost_ingestion.creds_encryption_keys.values_mut() {
             *secret = secret_management_client
                 .get_secret(secret.clone())
@@ -1348,6 +1414,16 @@ impl GlobalConfig {
                     )
                 ));
             }
+        }
+        // Enrolling starts with a link sent to the user's mailbox, so without an email backend no
+        // one could enrol — and under `required`, no one could sign in.
+        if self.user_auth.two_factor_auth.mode != TwoFactorMode::Off && !self.email.is_active() {
+            return Err(error_stack::report!(
+                error::ConfigurationError::InvalidConfigurationValueError(
+                    "user_auth.two_factor_auth.mode needs an email backend (email.active_email_client)"
+                        .to_string(),
+                )
+            ));
         }
         if self.analytics.capture.details_max_bytes == 0 {
             return Err(error_stack::report!(
@@ -1437,6 +1513,36 @@ mod tests {
         config
             .validate()
             .expect("real secrets should validate without the opt-out");
+    }
+
+    #[test]
+    fn two_factor_authentication_needs_an_email_backend() {
+        let mut config = GlobalConfig::new().expect("failed to parse the development config");
+        assert_eq!(config.user_auth.two_factor_auth.mode, TwoFactorMode::Off);
+
+        config.email.active_email_client = EmailClientChoice::NoEmailClient;
+        config.user_auth.two_factor_auth.mode = TwoFactorMode::Required;
+        assert!(
+            config.validate().is_err(),
+            "required without email must not start"
+        );
+
+        config.user_auth.two_factor_auth.mode = TwoFactorMode::Off;
+        config.validate().expect("off needs no email backend");
+    }
+
+    #[test]
+    fn two_factor_mode_reads_its_config_spelling() {
+        #[derive(serde::Deserialize)]
+        struct Holder {
+            two_factor_auth: TwoFactorAuthConfig,
+        }
+        let holder: Holder =
+            toml::from_str("[two_factor_auth]\nmode = \"required\"\nsecret_key = \"00\"\n")
+                .expect("parses");
+        assert_eq!(holder.two_factor_auth.mode, TwoFactorMode::Required);
+        assert_eq!(holder.two_factor_auth.issuer_name, "Juspay Decision Engine");
+        assert!(toml::from_str::<Holder>("[two_factor_auth]\nmode = \"optional\"\n").is_err());
     }
 
     #[test]

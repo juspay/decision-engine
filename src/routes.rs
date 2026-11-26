@@ -22,6 +22,7 @@ pub mod rule_configuration;
 pub mod scoring_data_ttl;
 pub mod seed_costs;
 pub mod settlement_webhook;
+pub mod two_factor_auth;
 pub mod update_gateway_score;
 pub mod update_score;
 pub mod user_auth;

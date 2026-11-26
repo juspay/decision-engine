@@ -599,6 +599,8 @@ diesel::table! {
         is_active -> Bool,
         email_verified -> Bool,
         created_at -> Timestamp,
+        totp_secret -> Nullable<Text>,
+        totp_recovery_codes -> Nullable<Text>,
     }
 }
 

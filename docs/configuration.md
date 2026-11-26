@@ -243,6 +243,45 @@ requests skip the JWT denylist read in Redis for that many milliseconds. The cos
 stored — so an outage can't extend a revoked session. Token expiry (`exp`) is unaffected.
 `0` (the default) reads Redis on every request; `1000` bounds revocation to a second.
 
+### Two-factor authentication
+
+```toml
+[user_auth.two_factor_auth]
+mode = "off"            # off | required
+issuer_name = "Juspay Decision Engine"
+secret_key = ""         # hex-encoded 32 bytes: `openssl rand -hex 32`
+```
+
+Dashboard password logins can require a code from an authenticator app (TOTP: SHA-1, 6 digits,
+30-second steps, the same parameters Hyperswitch's dashboard uses, via the `totp-rs` crate).
+Sessions handed over from Hyperswitch are unaffected; Hyperswitch runs its own second factor.
+
+- `off` — no enrolment, no challenge.
+- `required` — every login completes two-factor authentication, and it cannot be turned off.
+  A user who has not enrolled — every existing user, the first time — is sent a link to
+  **re-verify their email**. Setup continues from that link, in the browser that opened it, so
+  enrolling takes both the password and the mailbox. Signup without
+  `email_verification_enabled` goes through the same steps instead of returning a session.
+  To get a new link, the user signs in again; at most one email goes out per minute.
+
+`required` needs an email backend (`email.active_email_client`) and a valid `secret_key`,
+or startup fails. The key seals each user's TOTP secret (AES-256-GCM) and keys the digests of
+their recovery codes, so keep it stable: changing it invalidates every enrolment. It can be
+KMS-encrypted like the other secrets. Set it per deployment with
+`DECISION_ENGINE__USER_AUTH__TWO_FACTOR_AUTH__SECRET_KEY` and the mode with
+`DECISION_ENGINE__USER_AUTH__TWO_FACTOR_AUTH__MODE`.
+
+Each user gets 8 single-use recovery codes when they enrol, and can generate a new set from the
+Account page with a current authenticator code or one of their recovery codes, so losing the
+authenticator does not lock them out while codes remain. Codes are limited to 5 attempts per user per 5 minutes, and a
+code cannot be used twice. A user who has lost both their authenticator and their recovery codes is
+reset by clearing `users.totp_secret` and `users.totp_recovery_codes`; their next login enrols them
+again, re-verifying their email. Clearing the columns is also how a user moves to a new
+authenticator.
+
+Turning `required` on does not end sessions issued before it: they last until they expire
+(`jwt_expiry_seconds`). Rotate `jwt_secret` alongside the change to sign everyone out at once.
+
 ### Admin Secret
 
 ```toml

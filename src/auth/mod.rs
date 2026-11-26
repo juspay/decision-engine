@@ -1,6 +1,7 @@
 pub mod access;
 pub mod context;
 pub mod scope;
+pub mod two_factor;
 
 use error_stack::{Report, ResultExt};
 use josekit::jws::JwsHeader;

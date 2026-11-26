@@ -89,6 +89,7 @@ masking = { package = "hyperswitch_masking", version = "0.0.1", features = ["ser
 ring = { version = "0.17.8", features = ["std"] }
 hex = "0.4.3"
 bcrypt = "0.15"
+totp-rs = { version = "5.7.0", features = ["gen_secret", "otpauth"] }
 time = { version = "0.3.36", features = ["serde"] }
 uuid = { version = "1.10.0", features = ["v4", "v7", "fast-rng"] }
 reqwest = { version = "0.12.7", features = ["json", "__rustls"] }

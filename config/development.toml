@@ -1123,6 +1123,18 @@ jwt_revocation_cache_ttl_ms = 0
 # DECISION_ENGINE__USER_AUTH__SUPER_ADMIN_EMAILS).
 super_admin_emails = []
 
+# Two-factor authentication (TOTP authenticator apps) for dashboard password logins.
+#   off      — no enrolment and no challenge
+#   required — every login completes 2FA; users who have not enrolled first re-verify their email
+#              (a link that continues setup) and then enrol before they get a session
+# "required" needs an email backend (active_email_client) and a secret_key: a hex-encoded
+# 32-byte key (`openssl rand -hex 32`) that seals TOTP secrets and keys the recovery-code digests.
+# Keep it stable — changing it invalidates every enrolment. Can be KMS-encrypted like other secrets.
+[user_auth.two_factor_auth]
+mode = "off"
+issuer_name = "Juspay Decision Engine"
+secret_key = ""
+
 [admin_secret]
 secret = "test_admin"
 
