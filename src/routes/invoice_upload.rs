@@ -17,6 +17,7 @@ use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 
 use crate::cost_ingestion::invoice::{self, StoredAddon};
+use crate::cost_ingestion::IngestError;
 use crate::error::RouteError;
 
 /// Upper bound on an uploaded invoice. Invoices are small; this rejects an accidental report upload
@@ -95,7 +96,7 @@ pub async fn upload_invoice(
         &body,
     )
     .await
-    .map_err(|e| RouteError::new(StatusCode::UNPROCESSABLE_ENTITY, e.to_string()))?;
+    .map_err(invoice_error)?;
 
     Ok(Json(InvoiceUploadResponse {
         merchant_id,
@@ -121,6 +122,26 @@ pub async fn upload_invoice(
             })
             .collect(),
     }))
+}
+
+/// A problem with the uploaded invoice is described back to the merchant; anything else is a
+/// server-side failure, logged in full and answered with a fixed phrase.
+fn invoice_error(e: IngestError) -> RouteError {
+    match e {
+        IngestError::UnknownConnector(connector) => {
+            RouteError::not_found(format!("connector {connector} does not support invoices"))
+        }
+        IngestError::Parse(_)
+        | IngestError::MalformedNotification(_)
+        | IngestError::MissingColumns { .. } => {
+            RouteError::new(StatusCode::UNPROCESSABLE_ENTITY, e.to_string())
+        }
+        IngestError::SignatureMismatch
+        | IngestError::UnknownSource(_)
+        | IngestError::Download(_)
+        | IngestError::Crypto(_)
+        | IngestError::Storage(_) => super::report_upload::storage_error("process the invoice", e),
+    }
 }
 
 /// One stored add-on for the dashboard listing.

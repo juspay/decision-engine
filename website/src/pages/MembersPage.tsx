@@ -164,7 +164,11 @@ export function MembersPage() {
 
         {inviteResult && (
           <div className={`mt-4 rounded-xl border p-4 ${inviteResult.is_new_user ? 'border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/20' : 'border-green-200 bg-green-50 dark:border-green-900/40 dark:bg-green-950/20'}`}>
-            {inviteResult.is_new_user ? (
+            {inviteResult.is_new_user && !inviteResult.password ? (
+              <p className="text-sm text-amber-800 dark:text-amber-300">
+                Account created for <span className="font-semibold">{inviteResult.email}</span> — their sign-in details have been emailed to them.
+              </p>
+            ) : inviteResult.is_new_user ? (
               <>
                 <p className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-2">
                   New account created — share these credentials

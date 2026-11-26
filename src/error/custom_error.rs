@@ -318,6 +318,10 @@ pub enum UserAuthError {
     InvalidToken,
     #[error("Storage error")]
     StorageError,
+    /// The session's revocation status could not be read, so the session is refused for now
+    /// without being treated as expired.
+    #[error("Session could not be verified, try again shortly")]
+    SessionCheckUnavailable,
     #[error("Token generation failed")]
     TokenGenerationFailed,
     #[error("Password hashing failed")]
@@ -360,6 +364,9 @@ impl axum::response::IntoResponse for UserAuthError {
             Self::Unauthorized => (hyper::StatusCode::UNAUTHORIZED, self.to_string()),
             Self::StorageError | Self::TokenGenerationFailed | Self::PasswordHashingFailed => {
                 (hyper::StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
+            }
+            Self::SessionCheckUnavailable => {
+                (hyper::StatusCode::SERVICE_UNAVAILABLE, self.to_string())
             }
             Self::EmailSendFailed => (hyper::StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             Self::InvalidVerificationToken => (hyper::StatusCode::BAD_REQUEST, self.to_string()),
