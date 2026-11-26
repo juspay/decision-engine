@@ -729,6 +729,40 @@ pub(crate) async fn scoring_data_redis_key(merchant_id: &str, payment_id: &str) 
     }
 }
 
+/// What a read of a payment's scoring context found.
+pub(crate) enum ScoringContext {
+    Found(Box<GatewayScoringData>),
+    /// No context is stored for this merchant's payment.
+    Absent,
+    /// A context may exist but could not be read.
+    Unreadable,
+}
+
+/// The payment's scoring context, only if it is this merchant's.
+pub(crate) async fn load_scoring_context(merchant_id: &str, payment_id: &str) -> ScoringContext {
+    let redis_key = scoring_data_redis_key(merchant_id, payment_id).await;
+    let redis = &get_tenant_app_state().await.redis_conn;
+    match redis
+        .get_key::<StoredGatewayScoringData>(&redis_key, "GatewayScoringData")
+        .await
+    {
+        Ok(stored) => {
+            let data = GatewayScoringData::from(stored);
+            if data.merchantId == merchant_id {
+                ScoringContext::Found(Box::new(data))
+            } else {
+                ScoringContext::Absent
+            }
+        }
+        // With compression on, a missing key also reads as an error, so only a key confirmed
+        // absent counts as absent.
+        Err(_) => match redis.key_exists(&redis_key).await {
+            Ok(false) => ScoringContext::Absent,
+            _ => ScoringContext::Unreadable,
+        },
+    }
+}
+
 pub async fn check_and_update_gateway_score(
     txn_detail: TxnDetail,
     txn_card_info: TxnCardInfo,

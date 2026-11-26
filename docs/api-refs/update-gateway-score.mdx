@@ -23,6 +23,24 @@ curl --location "$BASE_URL/update-gateway-score" \
   }'
 ```
 
+To have the update checked against the payment's `/decide` decision, name the connector with
+`attemptedConnector`, copied from the `/decide` response, instead of `gateway`:
+
+```bash
+curl --location "$BASE_URL/update-gateway-score" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "merchantId": "merchant_demo",
+    "attemptedConnector": { "connector": "stripe", "merchant_connector_id": "mca_stripe" },
+    "status": "CHARGED",
+    "paymentId": "sr_001"
+  }'
+```
+
+A connector the decision did not offer is refused with `422` `CONNECTOR_NOT_OFFERED`, and a payment
+without a stored decision with `404` `DECISION_NOT_FOUND`.
+
 ## Response
 
 ```text

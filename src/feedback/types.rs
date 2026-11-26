@@ -241,11 +241,18 @@ pub enum TxnObjectType {
 pub use gsm::{GsmErrorInfo, GsmInfo};
 
 #[derive(Debug, Serialize, Deserialize, Clone, crate::auth::MerchantScoped)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", try_from = "UpdateScoreRequest")]
 pub struct UpdateScorePayload {
     #[merchant]
     pub merchant_id: String,
+    /// The connector the outcome is for, as the decider scores it: `name:merchant_connector_id`,
+    /// or the bare name for a connector without an account. Sent as `gateway`, or derived from
+    /// `attemptedConnector`.
     pub gateway: String,
+    /// The connector account the payment was attempted on, as `/decide` returned it. When sent,
+    /// the update is checked against the connectors `/decide` offered for the payment, and a
+    /// `gateway` sent with it must name the same connector.
+    pub attempted_connector: Option<crate::types::decide::DecideConnector>,
     pub gateway_reference_id: Option<String>,
     pub status: TxnStatus,
     pub payment_id: String,
@@ -260,6 +267,61 @@ pub struct UpdateScorePayload {
     /// When present, the engine emits a SmartRetryDecision analytics event capturing
     /// which gateway was retried and whether it recovered the payment.
     pub is_smart_retry: Option<bool>,
+}
+
+/// The `/update-gateway-score` body as sent: `gateway` may be left out when `attemptedConnector`
+/// names the connector.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateScoreRequest {
+    merchant_id: String,
+    gateway: Option<String>,
+    attempted_connector: Option<crate::types::decide::DecideConnector>,
+    gateway_reference_id: Option<String>,
+    status: TxnStatus,
+    payment_id: String,
+    enforce_dynamic_routing_failure: Option<bool>,
+    txn_latency: Option<TransactionLatency>,
+    error_info: Option<crate::gsm::GsmErrorInfo>,
+    is_smart_retry: Option<bool>,
+}
+
+impl TryFrom<UpdateScoreRequest> for UpdateScorePayload {
+    type Error = String;
+
+    fn try_from(request: UpdateScoreRequest) -> Result<Self, Self::Error> {
+        let UpdateScoreRequest {
+            merchant_id,
+            gateway,
+            attempted_connector,
+            gateway_reference_id,
+            status,
+            payment_id,
+            enforce_dynamic_routing_failure,
+            txn_latency,
+            error_info,
+            is_smart_retry,
+        } = request;
+        // Whether a `gateway` sent with `attemptedConnector` agrees is checked with the update, so
+        // the answer can say why it was refused.
+        let gateway = match (gateway, attempted_connector.as_ref()) {
+            (Some(gateway), _) => gateway,
+            (None, Some(attempted)) => attempted.identifier(),
+            (None, None) => return Err("missing field `gateway`".to_string()),
+        };
+        Ok(Self {
+            merchant_id,
+            gateway,
+            attempted_connector,
+            gateway_reference_id,
+            status,
+            payment_id,
+            enforce_dynamic_routing_failure,
+            txn_latency,
+            error_info,
+            is_smart_retry,
+        })
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -632,5 +694,62 @@ mod tests {
             .expect("serialisable")
             .as_object()
             .is_some_and(|fields| fields.contains_key("connector")));
+    }
+
+    fn update(fields: serde_json::Value) -> Result<UpdateScorePayload, serde_json::Error> {
+        let mut body =
+            serde_json::json!({"merchantId": "m", "status": "CHARGED", "paymentId": "p"});
+        if let (Some(body), Some(fields)) = (body.as_object_mut(), fields.as_object()) {
+            body.extend(fields.clone());
+        }
+        serde_json::from_value(body)
+    }
+
+    #[test]
+    fn gateway_alone_is_used_as_sent() {
+        for gateway in ["stripe:mca_s", "stripe", ""] {
+            let payload =
+                update(serde_json::json!({"gateway": gateway})).expect("a gateway update");
+            assert_eq!(payload.gateway, gateway);
+            assert!(payload.attempted_connector.is_none());
+        }
+    }
+
+    #[test]
+    fn an_attempted_connector_names_the_gateway() {
+        let payload = update(serde_json::json!({
+            "attemptedConnector": {"connector": "stripe", "merchant_connector_id": "mca_s"}
+        }))
+        .expect("an attemptedConnector update");
+        assert_eq!(payload.gateway, "stripe:mca_s");
+        assert!(payload.attempted_connector.is_some());
+
+        let without_account = update(serde_json::json!({
+            "attemptedConnector": {"connector": "stripe", "merchant_connector_id": null}
+        }))
+        .expect("an attemptedConnector without an account");
+        assert_eq!(without_account.gateway, "stripe");
+    }
+
+    #[test]
+    fn a_gateway_sent_with_an_attempted_connector_is_kept_for_the_check() {
+        let payload = update(serde_json::json!({
+            "gateway": "stripe",
+            "attemptedConnector": {"connector": "stripe", "merchant_connector_id": "mca_s"}
+        }))
+        .expect("both fields");
+        assert_eq!(payload.gateway, "stripe");
+        assert!(payload.attempted_connector.is_some());
+    }
+
+    #[test]
+    fn a_connector_is_required() {
+        let error = update(serde_json::json!({})).expect_err("no connector");
+        assert!(error.to_string().contains("missing field `gateway`"));
+        let error = update(serde_json::json!({
+            "attemptedConnector": {"connector": "stripe", "account": "mca_s"}
+        }))
+        .expect_err("an unknown attemptedConnector field");
+        assert!(error.to_string().contains("unknown field"));
     }
 }

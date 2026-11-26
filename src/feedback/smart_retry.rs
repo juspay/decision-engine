@@ -1,11 +1,11 @@
 //! Smart retry: the connectors `/update-gateway-score` suggests for a retryable failure.
 
 use crate::app::get_tenant_app_state;
-use crate::decider::gatewaydecider::types::{
-    GatewayScoringData, ScoreKeyType, StoredGatewayScoringData,
-};
+use crate::decider::gatewaydecider::types::{GatewayScoringData, ScoreKeyType};
 use crate::decider::gatewaydecider::utils as GU;
-use crate::feedback::gateway_scoring_service::{scoring_data_redis_key, update_gateway_score_lock};
+use crate::feedback::gateway_scoring_service::{
+    load_scoring_context, update_gateway_score_lock, ScoringContext,
+};
 use crate::feedback::gateway_selection_scoring_v3 as GSSV3;
 use crate::feedback::types::UpdateScorePayload;
 use crate::feedback::utils::{self as Fbu, GatewayScoringType};
@@ -53,16 +53,10 @@ impl<'a> RetryConnectors<'a> {
 
     /// The payment's scoring context, only if it is this merchant's.
     async fn load_scoring_context(&self) -> Option<GatewayScoringData> {
-        let merchant_id = self.payload.merchant_id.as_str();
-        let redis_key = scoring_data_redis_key(merchant_id, &self.payload.payment_id).await;
-        get_tenant_app_state()
-            .await
-            .redis_conn
-            .get_key::<StoredGatewayScoringData>(&redis_key, "GatewayScoringData")
-            .await
-            .ok()
-            .map(GatewayScoringData::from)
-            .filter(|data| data.merchantId == merchant_id)
+        match load_scoring_context(&self.payload.merchant_id, &self.payload.payment_id).await {
+            ScoringContext::Found(data) => Some(*data),
+            ScoringContext::Absent | ScoringContext::Unreadable => None,
+        }
     }
 
     /// Whether `candidate` (`connector:mca`) is the reported gateway, with or without its mca id.

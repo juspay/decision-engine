@@ -174,6 +174,30 @@ pub async fn update_gateway_score(
                 )
             }
             .emit();
+            // An update naming its attemptedConnector is only scored for a connector /decide offered.
+            if let Err(refusal) = crate::feedback::attempted_connector::check(&payload).await {
+                let error_response = refusal.into_error_response(&payload);
+                crate::analytics::DomainAnalyticsEvent {
+                    merchant_id: Some(merchant_id.clone()),
+                    payment_id: Some(payment_id.clone()),
+                    gateway: Some(gateway.clone()),
+                    request_id: x_request_id.clone(),
+                    global_request_id: global_request_id.clone(),
+                    trace_id: trace_id.clone(),
+                    event_stage: Some("attempted_connector_refused".to_string()),
+                    ..crate::analytics::DomainAnalyticsEvent::error(
+                        crate::analytics::AnalyticsFlowContext::new(
+                            crate::analytics::ApiFlow::DynamicRouting,
+                            crate::analytics::FlowType::UpdateGatewayScoreError,
+                        ),
+                        crate::analytics::AnalyticsRoute::UpdateGatewayScore,
+                        error_response.error_code.clone(),
+                        error_response.error_message.clone(),
+                    )
+                }
+                .emit();
+                return Err(error_response);
+            }
             // GSM (pod rules or a Hyperswitch call) is looked up before responding, only with errorInfo.
             let mut gsm_info = match payload.error_info.as_ref() {
                 Some(error_info) => {

@@ -3838,6 +3838,15 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "The body could not be parsed, or `gateway` and `attemptedConnector` name different connectors (`CONNECTOR_MISMATCH`)."
+          },
+          "404": {
+            "description": "`attemptedConnector` was sent and no `/decide` decision is stored for the payment (`DECISION_NOT_FOUND`)."
+          },
+          "422": {
+            "description": "`attemptedConnector` names a connector `/decide` did not offer the payment (`CONNECTOR_NOT_OFFERED`); the message lists the connectors it offered."
           }
         },
         "security": [
@@ -6166,9 +6175,20 @@
         "type": "object",
         "required": [
           "merchantId",
-          "gateway",
           "paymentId",
           "status"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "gateway"
+            ]
+          },
+          {
+            "required": [
+              "attemptedConnector"
+            ]
+          }
         ],
         "properties": {
           "merchantId": {
@@ -6177,7 +6197,16 @@
           },
           "gateway": {
             "type": "string",
-            "example": "stripe"
+            "example": "stripe:mca_stripe",
+            "description": "The connector the outcome is for: `name:merchant_connector_id`, or the bare name for a connector without an account. Required unless `attemptedConnector` is sent; when both are sent they must name the same connector. Not checked against the payment's decision."
+          },
+          "attemptedConnector": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DecideConnector"
+              }
+            ],
+            "description": "The connector account the payment was attempted on, copied from the `connectors` of the payment's `/decide` response. When sent, the update is accepted only for a connector `/decide` offered the payment in its latest decision: another account, a bare name, or a connector it did not offer is refused with 422 `CONNECTOR_NOT_OFFERED`, and a payment without a stored decision with 404 `DECISION_NOT_FOUND`. A decision stored without a connector list, or one that cannot be read, is not checked."
           },
           "paymentId": {
             "type": "string",
