@@ -38,8 +38,8 @@ curl --location "$BASE_URL/update-gateway-score" \
   }'
 ```
 
-A connector the decision did not offer is refused with `422` `CONNECTOR_NOT_OFFERED`, and a payment
-without a stored decision with `404` `DECISION_NOT_FOUND`.
+A connector the payment's stored decision did not offer is refused with `422` `CONNECTOR_NOT_OFFERED`.
+A payment without a stored decision is answered as a `gateway` update would be.
 
 ## Response
 

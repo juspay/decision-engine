@@ -3842,9 +3842,6 @@
           "400": {
             "description": "The body could not be parsed, or `gateway` and `attemptedConnector` name different connectors (`CONNECTOR_MISMATCH`)."
           },
-          "404": {
-            "description": "`attemptedConnector` was sent and no `/decide` decision is stored for the payment (`DECISION_NOT_FOUND`)."
-          },
           "422": {
             "description": "`attemptedConnector` names a connector `/decide` did not offer the payment (`CONNECTOR_NOT_OFFERED`); the message lists the connectors it offered."
           }
@@ -6206,7 +6203,7 @@
                 "$ref": "#/components/schemas/DecideConnector"
               }
             ],
-            "description": "The connector account the payment was attempted on, copied from the `connectors` of the payment's `/decide` response. When sent, the update is accepted only for a connector `/decide` offered the payment in its latest decision: another account, a bare name, or a connector it did not offer is refused with 422 `CONNECTOR_NOT_OFFERED`, and a payment without a stored decision with 404 `DECISION_NOT_FOUND`. A decision stored without a connector list, or one that cannot be read, is not checked."
+            "description": "The connector account the payment was attempted on, copied from the `connectors` of the payment's `/decide` response. When the payment has a stored decision with a connector list, the update is accepted only for a connector that decision offered: another account, a bare name, or a connector it did not offer is refused with 422 `CONNECTOR_NOT_OFFERED`. A payment without a stored decision (routed by its rule with rule-routed scoring off, or past its scoring-context TTL), or whose decision cannot be read, is not checked and is answered as a `gateway` update would be."
           },
           "paymentId": {
             "type": "string",

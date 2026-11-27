@@ -1,12 +1,15 @@
 import { test, expect, factory, poll } from '../../fixtures/test'
 import contract from '../../fixtures/contracts/decide-request.json'
 import type { ApiClient } from '../../fixtures/api-client'
+import { redisKeys } from '../../helpers/redis'
 import type { DecideRequest, DecideResponse } from '../../../website/src/types/api'
 
 /**
  * `/update-gateway-score` with `attemptedConnector`: the connector account the payment was
- * attempted on, sent back in the shape `/decide` returned it. Such an update is scored only for a
- * connector `/decide` offered the payment; an update that sends only `gateway` behaves as before.
+ * attempted on, sent back in the shape `/decide` returned it. When the payment has a stored decision,
+ * such an update is scored only for a connector that decision offered. Without one there is nothing
+ * to check or score, so it is answered as an update that sends only `gateway` would be. An update
+ * that sends only `gateway` behaves as before.
  */
 
 type Connector = { connector: string; merchant_connector_id: string | null }
@@ -24,23 +27,32 @@ function payment(eligible: Connector[], paymentId = factory.paymentId('attempt')
   return body
 }
 
+const srConfig = { defaultHedgingPercent: 0, defaultBucketSize: 10, subLevelInputConfig: [] }
+
+/** A `/decide` call; `sr` says whether the SR layer is expected to rank it. */
+async function decide(api: ApiClient, body: DecideRequest, sr = true) {
+  const response = await api.raw<DecideResponse>('POST', '/decide', { body })
+  expect(response.status).toBe(200)
+  expect(response.body.success_rate?.status ?? null).toBe(sr ? 'applied' : null)
+  return response.body
+}
+
+const feedback = (api: ApiClient, merchantId: string, paymentId: string, fields: Record<string, unknown>, status = 'FAILURE') =>
+  api.raw('POST', '/update-gateway-score', { failOnStatusCode: false, body: {
+    merchantId, paymentId, status, gatewayReferenceId: null, enforceDynamicRoutingFailure: null, ...fields,
+  } })
+
+/** A failure the bundled GSM rules answer with `retry` for adyen. */
+const retryableFailure = {
+  flow: 'Payment', subFlow: 'Authorize', errorCode: '127', errorMessage: "Required field 'accountHolderName' is not provided",
+  issuerErrorCode: null, cardNetwork: null,
+}
+
 test.describe('Feedback with attemptedConnector (API)', () => {
   test.beforeEach(async ({ api, merchant }) => {
-    await api.createSuccessRateConfig(merchant.id, { defaultHedgingPercent: 0, defaultBucketSize: 10, subLevelInputConfig: [] })
+    await api.createSuccessRateConfig(merchant.id, srConfig)
     await api.setMerchantFeature(merchant.id, 'sr-routing', true)
   })
-
-  const decide = async (api: ApiClient, body: DecideRequest) => {
-    const response = await api.raw<DecideResponse>('POST', '/decide', { body })
-    expect(response.status).toBe(200)
-    expect(response.body.success_rate?.status).toBe('applied')
-    return response.body
-  }
-
-  const feedback = (api: ApiClient, merchantId: string, paymentId: string, fields: Record<string, unknown>, status = 'FAILURE') =>
-    api.raw('POST', '/update-gateway-score', { failOnStatusCode: false, body: {
-      merchantId, paymentId, status, gatewayReferenceId: null, enforceDynamicRoutingFailure: null, ...fields,
-    } })
 
   test('scores the connector it names, copied from the /decide response', async ({ api, merchant }) => {
     // Each failure names the connector exactly as /decide returned it.
@@ -81,10 +93,40 @@ test.describe('Feedback with attemptedConnector (API)', () => {
     }
   })
 
-  test('refuses a payment /decide has no decision for', async ({ api, merchant }) => {
-    const response = await feedback(api, merchant.id, factory.paymentId('never_decided'), { attemptedConnector: stripe })
-    expect(response.status).toBe(404)
-    expect(response.body.error_code).toBe('DECISION_NOT_FOUND')
+  test('answers a payment with no stored decision as a gateway update would', async ({ api, merchant }) => {
+    const paymentId = factory.paymentId('never_decided')
+    const attempted = await feedback(api, merchant.id, paymentId, { attemptedConnector: stripe })
+    const named = await feedback(api, merchant.id, paymentId, { gateway: identifierOf(stripe) })
+    expect(attempted.status).toBe(200)
+    expect(attempted.body).toEqual({ ...named.body, gateway: identifierOf(stripe) })
+  })
+
+  test('suggests retry connectors and scores the retry, both by attemptedConnector', async ({ api, merchant }) => {
+    const body = payment([checkout, stripe, adyen])
+    await decide(api, body)
+    const failed = await feedback(api, merchant.id, body.payment_id, {
+      attemptedConnector: adyen, errorInfo: retryableFailure,
+    }, 'AUTHORIZATION_FAILED')
+    expect(failed.status).toBe(200)
+    expect(failed.body.gsm_info?.decision).toBe('retry')
+    // The other connectors the decision offered, never the one that failed.
+    expect([...failed.body.gsm_info.retryConnectors].sort()).toEqual([identifierOf(checkout), identifierOf(stripe)])
+
+    const retried = await feedback(api, merchant.id, body.payment_id, {
+      attemptedConnector: stripe, isSmartRetry: true,
+    }, 'CHARGED')
+    expect(retried.status).toBe(200)
+    expect(retried.body.gateway).toBe(identifierOf(stripe))
+  })
+
+  test('suggests the same retry connectors for a gateway update', async ({ api, merchant }) => {
+    const body = payment([checkout, stripe, adyen])
+    await decide(api, body)
+    const failed = await feedback(api, merchant.id, body.payment_id, {
+      gateway: identifierOf(adyen), errorInfo: retryableFailure,
+    }, 'AUTHORIZATION_FAILED')
+    expect(failed.status).toBe(200)
+    expect([...failed.body.gsm_info.retryConnectors].sort()).toEqual([identifierOf(checkout), identifierOf(stripe)])
   })
 
   test('checks against the payment\'s latest decision', async ({ api, merchant }) => {
@@ -130,5 +172,55 @@ test.describe('Feedback with attemptedConnector (API)', () => {
     expect(unknownPayment.status).toBe(200)
     const missing = await feedback(api, merchant.id, body.payment_id, {})
     expect(missing.status).toBe(400)
+  })
+})
+
+test.describe('Feedback with attemptedConnector, without a stored decision (API)', () => {
+  test('a payment routed by its rule alone is answered, since nothing was stored to check', async ({ api, merchant }) => {
+    // SR off and rule-routed scoring off: /decide stores no scoring context.
+    const created = await api.createRoutingAlgorithm(factory.priorityRoutingPayload(merchant.id, {
+      connectors: [factory.gatewayConnector('checkout'), factory.gatewayConnector('stripe')],
+    }))
+    await api.activateRoutingAlgorithm(merchant.id, created.body.rule_id)
+    const body = payment([stripe, adyen, checkout])
+    const decision = await decide(api, body, false)
+    expect(decision.connectors).toEqual([checkout, stripe])
+    for (const attempted of [decision.connectors[0], adyen]) {
+      const response = await feedback(api, merchant.id, body.payment_id, { attemptedConnector: attempted })
+      expect(response.status, identifierOf(attempted)).toBe(200)
+    }
+  })
+
+  test('a payment routed by its rule with rule-routed scoring on is checked against the rule\'s connectors', async ({ api, merchant }) => {
+    await api.createSuccessRateConfig(merchant.id, srConfig)
+    await api.setMerchantFeature(merchant.id, 'sr-scores-from-rule-routing', true)
+    const created = await api.createRoutingAlgorithm(factory.priorityRoutingPayload(merchant.id, {
+      connectors: [factory.gatewayConnector('checkout'), factory.gatewayConnector('stripe')],
+    }))
+    await api.activateRoutingAlgorithm(merchant.id, created.body.rule_id)
+    const body = payment([stripe, adyen, checkout])
+    const decision = await decide(api, body, false)
+    expect(decision.connectors).toEqual([checkout, stripe])
+    expect((await feedback(api, merchant.id, body.payment_id, { attemptedConnector: checkout })).status).toBe(200)
+    // A candidate the rule left out was not offered.
+    const excluded = await feedback(api, merchant.id, body.payment_id, { attemptedConnector: adyen })
+    expect(excluded.status).toBe(422)
+    expect(excluded.body.error_code).toBe('CONNECTOR_NOT_OFFERED')
+  })
+
+  test('a redelivered update after the payment\'s context expired is answered, not refused', async ({ api, merchant }) => {
+    await api.createSuccessRateConfig(merchant.id, srConfig)
+    await api.setMerchantFeature(merchant.id, 'sr-routing', true)
+    const ttl = await api.raw('PUT', `/admin/merchant-account/${merchant.id}/scoring-data-ttl`, { body: { ttl_secs: 2 } })
+    expect(ttl.status, JSON.stringify(ttl.body)).toBe(200)
+    const body = payment([stripe, adyen])
+    await decide(api, body)
+    const first = await feedback(api, merchant.id, body.payment_id, { attemptedConnector: stripe }, 'CHARGED')
+    expect(first.status).toBe(200)
+    const key = `gateway_scoring_data_${merchant.id}_${body.payment_id}`
+    await expect.poll(() => redisKeys(key), { timeout: 10_000, intervals: [500] }).toEqual([])
+    const redelivered = await feedback(api, merchant.id, body.payment_id, { attemptedConnector: stripe }, 'CHARGED')
+    expect(redelivered.status).toBe(200)
+    expect(redelivered.body.gateway).toBe(identifierOf(stripe))
   })
 })

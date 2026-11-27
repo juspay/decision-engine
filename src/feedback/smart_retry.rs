@@ -3,9 +3,7 @@
 use crate::app::get_tenant_app_state;
 use crate::decider::gatewaydecider::types::{GatewayScoringData, ScoreKeyType};
 use crate::decider::gatewaydecider::utils as GU;
-use crate::feedback::gateway_scoring_service::{
-    load_scoring_context, update_gateway_score_lock, ScoringContext,
-};
+use crate::feedback::gateway_scoring_service::{update_gateway_score_lock, ScoringContextRead};
 use crate::feedback::gateway_selection_scoring_v3 as GSSV3;
 use crate::feedback::types::UpdateScorePayload;
 use crate::feedback::utils::{self as Fbu, GatewayScoringType};
@@ -23,15 +21,19 @@ impl<'a> RetryConnectors<'a> {
         Self { payload }
     }
 
-    /// The connectors to retry on; empty without a scoring context, eligible list, or anything left.
-    pub async fn find(&self) -> Vec<String> {
-        match self.load_scoring_context().await {
+    /// The connectors to retry on, from the payment's scoring `context`; empty without a context,
+    /// eligible list, or anything left.
+    pub async fn find(&self, context: &ScoringContextRead) -> Vec<String> {
+        match context.found() {
             Some(scoring_data) => {
-                let candidates = self.untried_eligible_connectors(&scoring_data).await;
+                let candidates = self.untried_eligible_connectors(scoring_data).await;
                 if candidates.len() < 2 {
                     candidates
                 } else {
-                    Self::sort_best_first(self.score_by_current_sr(scoring_data, candidates).await)
+                    Self::sort_best_first(
+                        self.score_by_current_sr(scoring_data.clone(), candidates)
+                            .await,
+                    )
                 }
             }
             None => Vec::new(),
@@ -49,14 +51,6 @@ impl<'a> RetryConnectors<'a> {
             }
         }
         candidates
-    }
-
-    /// The payment's scoring context, only if it is this merchant's.
-    async fn load_scoring_context(&self) -> Option<GatewayScoringData> {
-        match load_scoring_context(&self.payload.merchant_id, &self.payload.payment_id).await {
-            ScoringContext::Found(data) => Some(*data),
-            ScoringContext::Absent | ScoringContext::Unreadable => None,
-        }
     }
 
     /// Whether `candidate` (`connector:mca`) is the reported gateway, with or without its mca id.
