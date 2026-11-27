@@ -91,6 +91,7 @@ curl --location "$BASE_URL/rule/update" \
 
 - Send the full desired config, not only changed fields.
 - Changes affect future routing decisions.
+- Success-rate `subLevelInputConfig` rows with `"source": "autopilot"` belong to Autopilot, which retunes them on its own schedule. An update keeps the stored Autopilot rows whether or not it includes them, and ignores any it sends, so a stale copy can't revert a retune and a client that sends only its own rows can't drop them. To take a cluster over, send a row for it without `source`: Autopilot's row for that cluster is then dropped and Autopilot leaves the cluster alone. Hard refresh (`POST /gateway-score/reset`) clears Autopilot rows.
 
 ## Related
 

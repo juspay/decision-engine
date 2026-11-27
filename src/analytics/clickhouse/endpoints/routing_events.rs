@@ -1,9 +1,12 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::analytics::models::{
-    AnalyticsRange, RoutingEvent, RoutingEventType, RoutingEventsQuery, RoutingEventsResponse,
+    AnalyticsRange, GatewayLeadership, GatewayStanding, GatewayTrend, LeaderChangeReason,
+    LeadershipSpan, RoutingDimensionSummary, RoutingEvent, RoutingEventType, RoutingEventsQuery,
+    RoutingEventsResponse, ScoreTrend, ROUTING_EVENTS_MAX_TIMELINE_SPANS,
     ROUTING_EVENTS_SECOND_BUCKET_MAX_WINDOW_MS, ROUTING_EVENTS_SECOND_BUCKET_MS,
     ROUTING_EVENTS_STALENESS_BUCKETS, ROUTING_EVENTS_STALENESS_FLOOR_MS,
+    ROUTING_EVENTS_TREND_SLOTS,
 };
 use crate::analytics::service::now_ms;
 use crate::error::ApiError;
@@ -22,7 +25,10 @@ pub async fn load(
     let lookback_start_ms = start_ms.saturating_sub(staleness_horizon_ms(query.bucket_ms));
     let points =
         metrics::score_bucket_series::load(client, query, lookback_start_ms, end_ms).await?;
-    let mut events = detect_routing_events(&points, query, start_ms);
+    let SeriesAnalysis {
+        mut events,
+        dimensions,
+    } = analyze_score_series(&points, query, start_ms, end_ms);
 
     // Autopilot calibration retunes are real emitted domain events (not derivable from the
     // score series), so replay them from their own store and merge into the same feed.
@@ -33,7 +39,7 @@ pub async fn load(
         calibration_rows,
     ));
     // Re-establish the newest-first, deterministic order across both sources and re-cap:
-    // `detect_routing_events` already sorted/truncated its own output, so the calibration
+    // `analyze_score_series` already sorted/truncated its own output, so the calibration
     // rows we appended need folding back in.
     events.sort_by(|a, b| b.bucket_ms.cmp(&a.bucket_ms).then_with(|| a.id.cmp(&b.id)));
     events.truncate(query.limit);
@@ -43,6 +49,9 @@ pub async fn load(
         range: format_range(query),
         events,
         generated_at_ms: now_ms(),
+        window_start_ms: Some(start_ms),
+        window_end_ms: Some(end_ms),
+        dimensions,
     })
 }
 
@@ -90,7 +99,10 @@ struct GatewayState {
     last_seen_bucket_ms: i64,
 }
 
-type DimensionKey = (Option<String>, Option<String>);
+/// What a leader is tracked per: payment method type, payment method and SR v3 cluster. Each
+/// cluster keeps its own scores, so leaders are only compared within one; the cluster is `None`
+/// for snapshots recorded before it was, which fall back to the payment method alone.
+type DimensionKey = (Option<String>, Option<String>, Option<String>);
 
 fn dimension_part(value: &Option<String>) -> &str {
     value.as_deref().unwrap_or("-")
@@ -108,12 +120,19 @@ fn event_id(
         Some(previous) => format!("{previous}>{gateway}"),
         None => gateway.to_string(),
     };
+    // The cluster is appended only when known, so IDs of events without one stay as they were.
+    let cluster = dimension
+        .2
+        .as_deref()
+        .map(|cluster| format!("[{cluster}]"))
+        .unwrap_or_default();
     format!(
-        "{}:{}:{}:{}:{}:{}",
+        "{}:{}:{}:{}{}:{}:{}",
         event_type.as_str(),
         merchant_id,
         dimension_part(&dimension.0),
         dimension_part(&dimension.1),
+        cluster,
         bucket_ms,
         transition
     )
@@ -166,19 +185,173 @@ fn calibration_events_to_routing_events(
             currency: row.currency,
             country: row.country,
             auth_type: row.auth_type,
+            card_is_in: None,
+            leader_change_reason: None,
+            score_before: None,
+            previous_score_before: None,
+            // Retunes name their cluster through the dimension fields above.
+            sr_dimension: None,
         })
         .collect()
+}
+
+/// What one pass over the score series yields: the routing events (newest first, capped at
+/// `query.limit`) and a leadership summary per dimension over the whole window.
+struct SeriesAnalysis {
+    events: Vec<RoutingEvent>,
+    dimensions: Vec<RoutingDimensionSummary>,
 }
 
 /// Walk bucketed score points per dimension, carrying the last known score per
 /// gateway forward across sparse buckets, and emit routing events. Pure and
 /// deterministic so event IDs are stable across polls.
+#[cfg(test)]
 fn detect_routing_events(
     points: &[ScoreBucketPoint],
     query: &RoutingEventsQuery,
     window_start_ms: i64,
 ) -> Vec<RoutingEvent> {
+    // The events do not depend on the window end; any end past the last bucket will do.
+    let window_end_ms = points
+        .iter()
+        .map(|point| point.bucket_ms)
+        .max()
+        .map_or(window_start_ms, |last_bucket_ms| last_bucket_ms + 1)
+        .max(window_start_ms);
+    analyze_score_series(points, query, window_start_ms, window_end_ms).events
+}
+
+/// Whether `gateway_state` can lead at `at_ms`: a fresh enough score backed by enough
+/// transactions. The one eligibility rule the leader, flip and summary logic all share.
+fn is_eligible(
+    gateway_state: &GatewayState,
+    at_ms: i64,
+    query: &RoutingEventsQuery,
+    staleness_ms: i64,
+) -> bool {
+    gateway_state.transaction_count.unwrap_or(0) >= query.min_transaction_count
+        && at_ms.saturating_sub(gateway_state.last_seen_bucket_ms) <= staleness_ms
+}
+
+/// The best eligible gateway at `at_ms`; ties break to the lexicographically smaller name
+/// so the outcome is deterministic.
+fn best_eligible(
+    state: &HashMap<String, GatewayState>,
+    at_ms: i64,
+    query: &RoutingEventsQuery,
+    staleness_ms: i64,
+) -> Option<(String, f64)> {
+    state
+        .iter()
+        .filter(|(_, gateway_state)| is_eligible(gateway_state, at_ms, query, staleness_ms))
+        .max_by(|(name_a, state_a), (name_b, state_b)| {
+            state_a
+                .score
+                .partial_cmp(&state_b.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| name_b.cmp(name_a))
+        })
+        .map(|(name, gateway_state)| (name.clone(), gateway_state.score))
+}
+
+/// Leadership time for one dimension, clipped to `[window_start_ms, window_end_ms)`.
+#[derive(Default)]
+struct LeadershipClock {
+    leader_ms: HashMap<String, i64>,
+    no_leader_ms: i64,
+    leader_at_window_start: Option<String>,
+    /// Contiguous stretches of one holder, in time order.
+    spans: Vec<LeadershipSpan>,
+}
+
+impl LeadershipClock {
+    fn credit(&mut self, holder: Option<&str>, from_ms: i64, to_ms: i64, window: (i64, i64)) {
+        let (window_start_ms, window_end_ms) = window;
+        let from_ms = from_ms.max(window_start_ms);
+        let to_ms = to_ms.min(window_end_ms);
+        if to_ms <= from_ms {
+            return;
+        }
+        if from_ms == window_start_ms {
+            self.leader_at_window_start = holder.map(str::to_string);
+        }
+        match holder {
+            Some(gateway) => {
+                *self.leader_ms.entry(gateway.to_string()).or_default() += to_ms - from_ms
+            }
+            None => self.no_leader_ms += to_ms - from_ms,
+        }
+        match self.spans.last_mut() {
+            Some(last) if last.end_ms == from_ms && last.gateway.as_deref() == holder => {
+                last.end_ms = to_ms;
+            }
+            _ => self.spans.push(LeadershipSpan {
+                gateway: holder.map(str::to_string),
+                start_ms: from_ms,
+                end_ms: to_ms,
+            }),
+        }
+    }
+
+    /// Credit `[from_ms, to_ms)`, during which no new scores arrive. The reported leader holds
+    /// while it stays eligible; once it ages out the best still-eligible gateway holds (what
+    /// the detector concludes at the next bucket), and once none is eligible, no one does.
+    #[allow(clippy::too_many_arguments)]
+    fn credit_quiet_interval(
+        &mut self,
+        reported_leader: Option<&str>,
+        state: &HashMap<String, GatewayState>,
+        from_ms: i64,
+        to_ms: i64,
+        window: (i64, i64),
+        query: &RoutingEventsQuery,
+        staleness_ms: i64,
+    ) {
+        // Eligibility only changes when a gateway's score ages out, so split the interval there.
+        let mut cuts: Vec<i64> = state
+            .values()
+            .map(|gateway_state| {
+                gateway_state
+                    .last_seen_bucket_ms
+                    .saturating_add(staleness_ms)
+            })
+            .filter(|deadline| *deadline > from_ms && *deadline < to_ms)
+            .collect();
+        cuts.sort_unstable();
+        cuts.dedup();
+        let mut segment_start = from_ms;
+        for segment_end in cuts.into_iter().chain(std::iter::once(to_ms)) {
+            // Freshness only runs out inside a quiet interval, so a gateway eligible at the
+            // segment's last instant was eligible for all of it.
+            let judged_at = segment_end.saturating_sub(1).max(segment_start);
+            let holder = reported_leader
+                .filter(|leader| {
+                    state.get(*leader).is_some_and(|gateway_state| {
+                        is_eligible(gateway_state, judged_at, query, staleness_ms)
+                    })
+                })
+                .map(str::to_string)
+                .or_else(|| {
+                    best_eligible(state, judged_at, query, staleness_ms).map(|(name, _)| name)
+                });
+            self.credit(holder.as_deref(), segment_start, segment_end, window);
+            segment_start = segment_end;
+        }
+    }
+}
+
+/// Walk bucketed score points per dimension, carrying the last known score per gateway
+/// forward across sparse buckets. Emits routing events (pure and deterministic, so event IDs
+/// are stable across polls) and, from the same walk, each dimension's leadership over
+/// `[window_start_ms, window_end_ms)`.
+fn analyze_score_series(
+    points: &[ScoreBucketPoint],
+    query: &RoutingEventsQuery,
+    window_start_ms: i64,
+    window_end_ms: i64,
+) -> SeriesAnalysis {
     let staleness_ms = staleness_horizon_ms(query.bucket_ms);
+    let window = (window_start_ms, window_end_ms);
 
     // dimension -> bucket -> rows, ordered for deterministic iteration.
     let mut dimensions: BTreeMap<DimensionKey, BTreeMap<i64, Vec<&ScoreBucketPoint>>> =
@@ -191,6 +364,7 @@ fn detect_routing_events(
             .entry((
                 point.payment_method_type.clone(),
                 point.payment_method.clone(),
+                Some(point.sr_dimension.clone()).filter(|cluster| !cluster.is_empty()),
             ))
             .or_default()
             .entry(point.bucket_ms)
@@ -199,8 +373,10 @@ fn detect_routing_events(
     }
 
     let mut events = Vec::new();
+    let mut summaries = Vec::new();
 
     for (dimension, buckets) in &dimensions {
+        let fields = cluster_fields(buckets);
         let mut state: HashMap<String, GatewayState> = HashMap::new();
         // Gateways currently inside the leader's auth band; membership is
         // edge-triggered so an entry event fires only on a fresh crossing.
@@ -210,8 +386,25 @@ fn detect_routing_events(
         // demoted leader into the band silently when it stays within tolerance.
         let mut prior_bucket_leader: Option<String> = None;
         let mut is_first_bucket = true;
+        let mut clock = LeadershipClock::default();
+        let mut leader_change_count: u32 = 0;
+        let mut leader_since_ms: Option<i64> = None;
+        let mut has_in_window_bucket = false;
 
-        for (&bucket_ms, rows) in buckets {
+        // Before the first loaded bucket nothing had a fresh score (the lookback spans a
+        // full staleness horizon), so that stretch of the window had no leader.
+        if let Some(first_bucket_ms) = buckets.keys().next() {
+            clock.credit(None, window_start_ms, *first_bucket_ms, window);
+        }
+
+        let mut bucket_iter = buckets.iter().peekable();
+        while let Some((&bucket_ms, rows)) = bucket_iter.next() {
+            has_in_window_bucket |= bucket_ms >= window_start_ms;
+            // Scores as they stood before this bucket, for the flip's before/after context.
+            let scores_before: HashMap<String, f64> = state
+                .iter()
+                .map(|(gateway, gateway_state)| (gateway.clone(), gateway_state.score))
+                .collect();
             for row in rows {
                 let gateway = row.gateway.clone().unwrap_or_default();
                 let score = row.score_value.unwrap_or_default();
@@ -225,24 +418,9 @@ fn detect_routing_events(
                 );
             }
 
-            // Leader = best eligible score; ties break to the lexicographically
-            // smaller gateway so the outcome is deterministic.
-            let leader = state
-                .iter()
-                .filter(|(_, gateway_state)| {
-                    gateway_state.transaction_count.unwrap_or(0) >= query.min_transaction_count
-                        && bucket_ms - gateway_state.last_seen_bucket_ms <= staleness_ms
-                })
-                .max_by(|(name_a, state_a), (name_b, state_b)| {
-                    state_a
-                        .score
-                        .partial_cmp(&state_b.score)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                        .then_with(|| name_b.cmp(name_a))
-                })
-                .map(|(name, gateway_state)| (name.clone(), gateway_state.score));
+            let leader = best_eligible(&state, bucket_ms, query, staleness_ms);
 
-            if let Some((leader_name, leader_score)) = leader {
+            if let Some((leader_name, leader_score)) = leader.clone() {
                 // Snapshot the prior bucket's leader before advancing it; the band
                 // detector uses it to recognise a leader that just got overtaken.
                 let former_leader = prior_bucket_leader.clone();
@@ -270,9 +448,7 @@ fn detect_routing_events(
                     Some(previous) if *previous != leader_name => {
                         let previous_state = state.get(previous);
                         let previous_still_eligible = previous_state.is_some_and(|gateway_state| {
-                            gateway_state.transaction_count.unwrap_or(0)
-                                >= query.min_transaction_count
-                                && bucket_ms - gateway_state.last_seen_bucket_ms <= staleness_ms
+                            is_eligible(gateway_state, bucket_ms, query, staleness_ms)
                         });
                         let previous_score =
                             previous_state.map(|gateway_state| gateway_state.score);
@@ -308,11 +484,24 @@ fn detect_routing_events(
                                 previous_bucket_size: None,
                                 hedging_percent: None,
                                 previous_hedging_percent: None,
-                                card_network: None,
-                                currency: None,
-                                country: None,
-                                auth_type: None,
+                                card_network: fields.get("card_network").cloned(),
+                                currency: fields.get("currency").cloned(),
+                                country: fields.get("country").cloned(),
+                                auth_type: fields.get("auth_type").cloned(),
+                                card_is_in: fields.get("card_is_in").cloned(),
+                                leader_change_reason: Some(if previous_still_eligible {
+                                    LeaderChangeReason::Overtaken
+                                } else {
+                                    LeaderChangeReason::IncumbentStale
+                                }),
+                                sr_dimension: dimension.2.clone(),
+                                score_before: scores_before.get(&leader_name).copied(),
+                                previous_score_before: scores_before.get(previous).copied(),
                             });
+                            if bucket_ms >= window_start_ms {
+                                leader_change_count += 1;
+                                leader_since_ms = Some(bucket_ms);
+                            }
                             previous_leader = Some(leader_name);
                         }
                     }
@@ -323,7 +512,39 @@ fn detect_routing_events(
                 }
             }
 
+            // Credit the time until the next bucket (or the window end) to whoever leads.
+            let next_bucket_ms = bucket_iter
+                .peek()
+                .map(|(&next, _)| next)
+                .unwrap_or(window_end_ms);
+            clock.credit_quiet_interval(
+                leader.as_ref().and(previous_leader.as_deref()),
+                &state,
+                bucket_ms,
+                next_bucket_ms,
+                window,
+                query,
+                staleness_ms,
+            );
+
             is_first_bucket = false;
+        }
+
+        let in_window_leader_ms: i64 = clock.leader_ms.values().sum();
+        if has_in_window_bucket || in_window_leader_ms > 0 {
+            let mut summary = dimension_summary(
+                dimension,
+                previous_leader,
+                leader_since_ms,
+                leader_change_count,
+                clock,
+                &state,
+                window_end_ms,
+                query,
+                staleness_ms,
+            );
+            summary.trend = Some(score_trend(buckets, window, query.bucket_ms, staleness_ms));
+            summaries.push(summary);
         }
     }
 
@@ -331,7 +552,220 @@ fn detect_routing_events(
     events.retain(|event| event.bucket_ms >= window_start_ms);
     events.sort_by(|a, b| b.bucket_ms.cmp(&a.bucket_ms).then_with(|| a.id.cmp(&b.id)));
     events.truncate(query.limit);
-    events
+    SeriesAnalysis {
+        events,
+        dimensions: summaries,
+    }
+}
+
+/// Keep a timeline within `max_spans`. Past the cap (only a dimension that flapped hundreds of
+/// times), the window is cut into `max_spans` equal slots and each slot goes to whoever held
+/// most of it — the same picture at any width a client can draw, with a bounded payload.
+fn bounded_timeline(spans: Vec<LeadershipSpan>, max_spans: usize) -> Vec<LeadershipSpan> {
+    let (Some(first), Some(last)) = (spans.first(), spans.last()) else {
+        return spans;
+    };
+    if spans.len() <= max_spans || max_spans == 0 {
+        return spans;
+    }
+    let (start_ms, end_ms) = (first.start_ms, last.end_ms);
+    let slots = i64::try_from(max_spans).unwrap_or(i64::MAX);
+    let mut slotted: Vec<LeadershipSpan> = Vec::with_capacity(max_spans);
+    let mut cursor = 0;
+    for slot in 0..slots {
+        let slot_start = start_ms + (end_ms - start_ms) * slot / slots;
+        let slot_end = start_ms + (end_ms - start_ms) * (slot + 1) / slots;
+        if slot_end <= slot_start {
+            continue;
+        }
+        // Time each holder spent inside this slot; spans are ordered, so resume at `cursor`.
+        let mut held: Vec<(Option<String>, i64)> = Vec::new();
+        while let Some(span) = spans.get(cursor) {
+            let overlap = span.end_ms.min(slot_end) - span.start_ms.max(slot_start);
+            if overlap > 0 {
+                match held
+                    .iter_mut()
+                    .find(|(gateway, _)| *gateway == span.gateway)
+                {
+                    Some((_, ms)) => *ms += overlap,
+                    None => held.push((span.gateway.clone(), overlap)),
+                }
+            }
+            if span.end_ms > slot_end {
+                break;
+            }
+            cursor += 1;
+        }
+        // Most time wins; ties go to the holder seen first, so the result is deterministic.
+        let winner = held
+            .iter()
+            .fold(None::<&(Option<String>, i64)>, |best, entry| match best {
+                Some(best) if best.1 >= entry.1 => Some(best),
+                _ => Some(entry),
+            })
+            .map(|(gateway, _)| gateway.clone())
+            .unwrap_or(None);
+        match slotted.last_mut() {
+            Some(previous) if previous.gateway == winner => previous.end_ms = slot_end,
+            _ => slotted.push(LeadershipSpan {
+                gateway: winner,
+                start_ms: slot_start,
+                end_ms: slot_end,
+            }),
+        }
+    }
+    slotted
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dimension_summary(
+    dimension: &DimensionKey,
+    leader: Option<String>,
+    leader_since_ms: Option<i64>,
+    leader_change_count: u32,
+    clock: LeadershipClock,
+    state: &HashMap<String, GatewayState>,
+    window_end_ms: i64,
+    query: &RoutingEventsQuery,
+    staleness_ms: i64,
+) -> RoutingDimensionSummary {
+    let mut leadership: Vec<GatewayLeadership> = clock
+        .leader_ms
+        .into_iter()
+        .filter(|(_, leader_ms)| *leader_ms > 0)
+        .map(|(gateway, leader_ms)| GatewayLeadership { gateway, leader_ms })
+        .collect();
+    leadership.sort_by(|a, b| {
+        b.leader_ms
+            .cmp(&a.leader_ms)
+            .then_with(|| a.gateway.cmp(&b.gateway))
+    });
+
+    let mut standings: Vec<GatewayStanding> = state
+        .iter()
+        .map(|(gateway, gateway_state)| GatewayStanding {
+            gateway: gateway.clone(),
+            score: gateway_state.score,
+            transaction_count: gateway_state.transaction_count,
+            last_seen_ms: gateway_state.last_seen_bucket_ms,
+            eligible: is_eligible(gateway_state, window_end_ms, query, staleness_ms),
+        })
+        .collect();
+    standings.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.gateway.cmp(&b.gateway))
+    });
+
+    RoutingDimensionSummary {
+        payment_method_type: dimension.0.clone(),
+        payment_method: dimension.1.clone(),
+        sr_dimension: dimension.2.clone(),
+        trend: None,
+        leader,
+        leader_since_ms,
+        leader_at_window_start: clock.leader_at_window_start,
+        timeline: bounded_timeline(clock.spans, ROUTING_EVENTS_MAX_TIMELINE_SPANS),
+        leader_change_count,
+        leadership,
+        no_leader_ms: clock.no_leader_ms,
+        standings,
+        last_activity_ms: state
+            .values()
+            .map(|gateway_state| gateway_state.last_seen_bucket_ms)
+            .max(),
+    }
+}
+
+/// A cluster's configured dimensions by field name, read from its snapshots (each carries the
+/// same object); empty for snapshots recorded before they were.
+fn cluster_fields(buckets: &BTreeMap<i64, Vec<&ScoreBucketPoint>>) -> HashMap<String, String> {
+    buckets
+        .values()
+        .flatten()
+        .find(|point| !point.sr_dimensions.is_empty())
+        .and_then(|point| serde_json::from_str(&point.sr_dimensions).ok())
+        .unwrap_or_default()
+}
+
+/// Samples one dimension's score series into at most `ROUTING_EVENTS_TREND_SLOTS` slots: each
+/// gateway's latest score at a slot's end while it is still fresh (within `staleness_ms`), and
+/// the number of score updates in the slot. Sampling starts where the dimension's traffic starts
+/// in the window (or at the window start when scores carry over from before it), so a burst late
+/// in a long window keeps its detail. Earlier buckets only seed the scores. Slots are whole
+/// buckets wide, so a slot never splits a bucket.
+fn score_trend(
+    buckets: &BTreeMap<i64, Vec<&ScoreBucketPoint>>,
+    (window_start_ms, window_end_ms): (i64, i64),
+    bucket_ms: i64,
+    staleness_ms: i64,
+) -> ScoreTrend {
+    let carries_over = buckets
+        .range(..window_start_ms)
+        .next_back()
+        .is_some_and(|(&at_ms, _)| window_start_ms - at_ms <= staleness_ms);
+    let window_start_ms = if carries_over {
+        window_start_ms
+    } else {
+        buckets
+            .range(window_start_ms..window_end_ms)
+            .next()
+            .map_or(window_start_ms, |(&at_ms, _)| at_ms)
+    };
+    let span_ms = (window_end_ms - window_start_ms).max(1);
+    let bucket_ms = bucket_ms.max(1);
+    let slots_i64 = i64::try_from(ROUTING_EVENTS_TREND_SLOTS).unwrap_or(i64::MAX);
+    let min_slot_ms = (span_ms + slots_i64 - 1) / slots_i64;
+    let slot_ms = ((min_slot_ms + bucket_ms - 1) / bucket_ms).max(1) * bucket_ms;
+    let slot_count = usize::try_from((span_ms + slot_ms - 1) / slot_ms).unwrap_or(0);
+
+    let gateways: Vec<String> = buckets
+        .range(window_start_ms..window_end_ms)
+        .flat_map(|(_, rows)| rows.iter().filter_map(|row| row.gateway.clone()))
+        .collect::<std::collections::BTreeSet<String>>()
+        .into_iter()
+        .collect();
+
+    let mut latest: HashMap<&str, (f64, i64)> = HashMap::new();
+    let mut payments = vec![0_u64; slot_count];
+    let mut scores: Vec<Vec<Option<f64>>> = vec![Vec::with_capacity(slot_count); gateways.len()];
+    let mut pending = buckets.range(..window_end_ms).peekable();
+
+    for (slot, slot_payments) in payments.iter_mut().enumerate() {
+        let slot_index = i64::try_from(slot).unwrap_or(i64::MAX);
+        let slot_end_ms = (window_start_ms + (slot_index + 1) * slot_ms).min(window_end_ms);
+        while let Some((&at_ms, rows)) = pending.next_if(|(&at_ms, _)| at_ms < slot_end_ms) {
+            for row in rows {
+                let (Some(gateway), Some(score)) = (row.gateway.as_deref(), row.score_value) else {
+                    continue;
+                };
+                latest.insert(gateway, (score, at_ms));
+                if at_ms >= window_start_ms {
+                    *slot_payments += row.update_count;
+                }
+            }
+        }
+        for (gateway, series) in gateways.iter().zip(scores.iter_mut()) {
+            series.push(
+                latest
+                    .get(gateway.as_str())
+                    .filter(|(_, seen_ms)| slot_end_ms - seen_ms <= staleness_ms)
+                    .map(|(score, _)| *score),
+            );
+        }
+    }
+
+    ScoreTrend {
+        start_ms: window_start_ms,
+        slot_ms,
+        payments,
+        gateways: gateways
+            .into_iter()
+            .zip(scores)
+            .map(|(gateway, scores)| GatewayTrend { gateway, scores })
+            .collect(),
+    }
 }
 
 /// Emit auth-band crossing events for every eligible non-leader gateway.
@@ -478,6 +912,11 @@ fn auth_band_event(
         currency: None,
         country: None,
         auth_type: None,
+        card_is_in: None,
+        leader_change_reason: None,
+        score_before: None,
+        previous_score_before: None,
+        sr_dimension: dimension.2.clone(),
     }
 }
 
@@ -560,9 +999,26 @@ mod tests {
             merchant_id: Some("m_123".to_string()),
             payment_method_type: Some("card".to_string()),
             payment_method: Some("credit".to_string()),
+            sr_dimension: String::new(),
+            sr_dimensions: String::new(),
             gateway: Some(gateway.to_string()),
             score_value: Some(score),
             transaction_count: Some(transaction_count),
+            update_count: 1,
+        }
+    }
+
+    /// A point from one SR v3 cluster, as snapshots carry it once the cluster is recorded.
+    fn clustered(
+        cluster: &str,
+        bucket_ms: i64,
+        gateway: &str,
+        score: f64,
+        transaction_count: i64,
+    ) -> ScoreBucketPoint {
+        ScoreBucketPoint {
+            sr_dimension: cluster.to_string(),
+            ..point(bucket_ms, gateway, score, transaction_count)
         }
     }
 
@@ -1083,5 +1539,477 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].bucket_ms, 2 * BUCKET);
         assert_eq!(events[0].gateway, "adyen");
+    }
+
+    fn analyze(
+        points: &[ScoreBucketPoint],
+        query: &RoutingEventsQuery,
+        window: (i64, i64),
+    ) -> SeriesAnalysis {
+        analyze_score_series(points, query, window.0, window.1)
+    }
+
+    fn leader_flips(events: &[RoutingEvent]) -> Vec<&RoutingEvent> {
+        events
+            .iter()
+            .filter(|event| event.event_type == RoutingEventType::LeaderChanged)
+            .collect()
+    }
+
+    #[test]
+    fn overtaking_flip_carries_reason_and_scores_before() {
+        let points = vec![
+            point(0, "adyen", 89.0, 100),
+            point(0, "stripe", 87.0, 100),
+            // adyen falls while stripe climbs past it.
+            point(BUCKET, "adyen", 80.0, 100),
+            point(BUCKET, "stripe", 90.0, 100),
+        ];
+        let events = detect_routing_events(&points, &query(), 0);
+        let flips = leader_flips(&events);
+        assert_eq!(flips.len(), 1);
+        let flip = flips[0];
+        assert_eq!(
+            flip.leader_change_reason,
+            Some(LeaderChangeReason::Overtaken)
+        );
+        assert_eq!(flip.score_before, Some(87.0));
+        assert_eq!(flip.score, Some(90.0));
+        assert_eq!(flip.previous_score_before, Some(89.0));
+        assert_eq!(flip.previous_score, Some(80.0));
+    }
+
+    #[test]
+    fn stale_handover_is_labelled_incumbent_stale() {
+        let mut points = vec![point(0, "adyen", 95.0, 100), point(0, "stripe", 80.0, 100)];
+        for bucket_index in 1..=(ROUTING_EVENTS_STALENESS_BUCKETS + 1) {
+            points.push(point(bucket_index * BUCKET, "stripe", 80.0, 100));
+        }
+        let events = detect_routing_events(&points, &query(), 0);
+        let flips = leader_flips(&events);
+        assert_eq!(flips.len(), 1);
+        assert_eq!(
+            flips[0].leader_change_reason,
+            Some(LeaderChangeReason::IncumbentStale)
+        );
+        // The new leader scores below the incumbent's last value: it was never beaten.
+        assert!(flips[0].score < flips[0].previous_score);
+    }
+
+    #[test]
+    fn non_leader_events_carry_no_leader_change_context() {
+        let rows = vec![calibration_row(1_700_000_000_000)];
+        let event = &calibration_events_to_routing_events("m_123", rows)[0];
+        assert!(event.leader_change_reason.is_none());
+        assert!(event.score_before.is_none());
+        assert!(event.previous_score_before.is_none());
+    }
+
+    #[test]
+    fn summary_splits_window_time_between_leaders() {
+        // adyen leads from the window start, stripe takes over at bucket 2, both keep
+        // reporting until the window ends at bucket 4.
+        let points = vec![
+            point(0, "adyen", 89.0, 100),
+            point(0, "stripe", 87.0, 100),
+            point(BUCKET, "adyen", 89.0, 100),
+            point(BUCKET, "stripe", 87.0, 100),
+            point(2 * BUCKET, "stripe", 92.0, 100),
+            point(3 * BUCKET, "stripe", 92.0, 100),
+            point(3 * BUCKET, "adyen", 89.0, 100),
+        ];
+        let analysis = analyze(&points, &query(), (0, 4 * BUCKET));
+        assert_eq!(analysis.dimensions.len(), 1);
+        let summary = &analysis.dimensions[0];
+        assert_eq!(summary.payment_method_type.as_deref(), Some("card"));
+        assert_eq!(summary.leader.as_deref(), Some("stripe"));
+        assert_eq!(summary.leader_since_ms, Some(2 * BUCKET));
+        assert_eq!(summary.leader_at_window_start.as_deref(), Some("adyen"));
+        assert_eq!(summary.leader_change_count, 1);
+        assert_eq!(
+            summary.leadership,
+            vec![
+                GatewayLeadership {
+                    gateway: "adyen".to_string(),
+                    leader_ms: 2 * BUCKET
+                },
+                GatewayLeadership {
+                    gateway: "stripe".to_string(),
+                    leader_ms: 2 * BUCKET
+                },
+            ]
+        );
+        assert_eq!(summary.no_leader_ms, 0);
+        // Standings are best first, with each gateway's latest score.
+        let standings: Vec<_> = summary
+            .standings
+            .iter()
+            .map(|standing| (standing.gateway.as_str(), standing.score, standing.eligible))
+            .collect();
+        assert_eq!(
+            standings,
+            vec![("stripe", 92.0, true), ("adyen", 89.0, true)]
+        );
+        assert_eq!(summary.last_activity_ms, Some(3 * BUCKET));
+    }
+
+    #[test]
+    fn quiet_stretch_beyond_staleness_counts_as_no_leader() {
+        // One snapshot, then silence: the leader holds for one staleness horizon and the
+        // rest of the window has no fresh score, so no one leads.
+        let staleness_ms = staleness_horizon_ms(BUCKET);
+        let window_end = staleness_ms + 6 * BUCKET;
+        let points = vec![point(0, "adyen", 89.0, 100)];
+        let summary = &analyze(&points, &query(), (0, window_end)).dimensions[0];
+        assert_eq!(
+            summary.leadership,
+            vec![GatewayLeadership {
+                gateway: "adyen".to_string(),
+                leader_ms: staleness_ms
+            }]
+        );
+        assert_eq!(summary.no_leader_ms, window_end - staleness_ms);
+        assert!(!summary.standings[0].eligible);
+        // The last reported leader is still named; the standings say it went quiet.
+        assert_eq!(summary.leader.as_deref(), Some("adyen"));
+    }
+
+    #[test]
+    fn time_before_first_snapshot_counts_as_no_leader() {
+        let window_start = 0;
+        let points = vec![point(2 * BUCKET, "adyen", 89.0, 100)];
+        let summary = &analyze(&points, &query(), (window_start, 4 * BUCKET)).dimensions[0];
+        assert_eq!(summary.leader_at_window_start, None);
+        assert_eq!(summary.no_leader_ms, 2 * BUCKET);
+        assert_eq!(summary.leadership[0].leader_ms, 2 * BUCKET);
+    }
+
+    #[test]
+    fn lookback_leader_is_the_leader_at_window_start() {
+        let window_start = 2 * BUCKET;
+        let points = vec![
+            point(0, "adyen", 89.0, 100),
+            point(0, "stripe", 87.0, 100),
+            point(BUCKET, "stripe", 95.0, 100),
+            point(3 * BUCKET, "stripe", 95.0, 100),
+        ];
+        let summary = &analyze(&points, &query(), (window_start, 4 * BUCKET)).dimensions[0];
+        // The flip happened in the lookback: not counted, but it sets the starting leader.
+        assert_eq!(summary.leader_change_count, 0);
+        assert_eq!(summary.leader_since_ms, None);
+        assert_eq!(summary.leader_at_window_start.as_deref(), Some("stripe"));
+        assert_eq!(
+            summary.leadership,
+            vec![GatewayLeadership {
+                gateway: "stripe".to_string(),
+                leader_ms: 2 * BUCKET
+            }]
+        );
+    }
+
+    #[test]
+    fn leader_change_count_is_not_capped_by_event_limit() {
+        let points = vec![
+            point(0, "adyen", 89.0, 100),
+            point(0, "stripe", 87.0, 100),
+            point(BUCKET, "stripe", 95.0, 100),
+            point(2 * BUCKET, "adyen", 99.0, 100),
+            point(3 * BUCKET, "stripe", 99.9, 100),
+        ];
+        let limited = RoutingEventsQuery {
+            limit: 1,
+            ..query()
+        };
+        let analysis = analyze(&points, &limited, (0, 4 * BUCKET));
+        assert_eq!(analysis.events.len(), 1);
+        assert_eq!(analysis.dimensions[0].leader_change_count, 3);
+    }
+
+    #[test]
+    fn dimension_with_only_lookback_data_that_aged_out_is_omitted() {
+        let staleness_ms = staleness_horizon_ms(BUCKET);
+        let window_start = staleness_ms + BUCKET;
+        let points = vec![point(0, "adyen", 89.0, 100)];
+        let analysis = analyze(&points, &query(), (window_start, window_start + BUCKET));
+        assert!(analysis.dimensions.is_empty());
+    }
+
+    #[test]
+    fn summary_serialises_additively() {
+        // Older clients only know the original fields; the new ones are optional extras.
+        let response = RoutingEventsResponse {
+            merchant_id: "m_123".to_string(),
+            range: "1h".to_string(),
+            events: Vec::new(),
+            generated_at_ms: 1,
+            window_start_ms: None,
+            window_end_ms: None,
+            dimensions: Vec::new(),
+        };
+        let json = serde_json::to_value(&response).expect("serialise");
+        assert_eq!(
+            json,
+            serde_json::json!({ "merchant_id": "m_123", "range": "1h", "events": [], "generated_at_ms": 1 })
+        );
+        let legacy: RoutingEventsResponse = serde_json::from_value(json).expect("deserialise");
+        assert!(legacy.dimensions.is_empty());
+    }
+
+    fn span(gateway: Option<&str>, start_ms: i64, end_ms: i64) -> LeadershipSpan {
+        LeadershipSpan {
+            gateway: gateway.map(str::to_string),
+            start_ms,
+            end_ms,
+        }
+    }
+
+    #[test]
+    fn timeline_orders_who_led_when_including_quiet_stretches() {
+        let staleness_ms = staleness_horizon_ms(BUCKET);
+        let points = vec![
+            point(BUCKET, "adyen", 89.0, 100),
+            point(BUCKET, "stripe", 87.0, 100),
+            point(2 * BUCKET, "stripe", 92.0, 100),
+        ];
+        let window_end = 2 * BUCKET + staleness_ms + BUCKET;
+        let summary = &analyze(&points, &query(), (0, window_end)).dimensions[0];
+        assert_eq!(
+            summary.timeline,
+            vec![
+                span(None, 0, BUCKET),
+                span(Some("adyen"), BUCKET, 2 * BUCKET),
+                span(Some("stripe"), 2 * BUCKET, 2 * BUCKET + staleness_ms),
+                span(None, 2 * BUCKET + staleness_ms, window_end),
+            ]
+        );
+        // The timeline and the totals tell the same story.
+        let timeline_ms: i64 = summary.timeline.iter().map(|s| s.end_ms - s.start_ms).sum();
+        let total_ms: i64 =
+            summary.leadership.iter().map(|l| l.leader_ms).sum::<i64>() + summary.no_leader_ms;
+        assert_eq!(timeline_ms, total_ms);
+        assert_eq!(timeline_ms, window_end);
+    }
+
+    #[test]
+    fn timeline_under_the_cap_is_returned_as_is() {
+        let spans = vec![span(Some("a"), 0, 10), span(Some("b"), 10, 20)];
+        assert_eq!(bounded_timeline(spans.clone(), 2), spans);
+    }
+
+    #[test]
+    fn timeline_over_the_cap_is_resampled_into_majority_slots() {
+        // 0–60: a leads with brief b blips; 60–100: b leads with one brief a blip.
+        let spans = vec![
+            span(Some("a"), 0, 18),
+            span(Some("b"), 18, 20),
+            span(Some("a"), 20, 38),
+            span(Some("b"), 38, 40),
+            span(Some("a"), 40, 60),
+            span(Some("b"), 60, 78),
+            span(Some("a"), 78, 80),
+            span(Some("b"), 80, 100),
+        ];
+        let bounded = bounded_timeline(spans, 5);
+        assert_eq!(
+            bounded,
+            vec![span(Some("a"), 0, 60), span(Some("b"), 60, 100)]
+        );
+        assert!(bounded.len() <= 5);
+    }
+
+    #[test]
+    fn timeline_resampling_keeps_quiet_stretches_and_covers_the_window() {
+        let mut spans = Vec::new();
+        for i in 0..10 {
+            let holder = if i % 2 == 0 { Some("a") } else { Some("b") };
+            spans.push(span(holder, i * 10, i * 10 + 10));
+        }
+        spans.push(span(None, 100, 400));
+        let bounded = bounded_timeline(spans, 4);
+        assert!(bounded.len() <= 4);
+        assert_eq!(bounded.first().map(|s| s.start_ms), Some(0));
+        assert_eq!(bounded.last().map(|s| s.end_ms), Some(400));
+        assert_eq!(bounded.last().and_then(|s| s.gateway.clone()), None);
+        // Contiguous: each slot starts where the previous ended.
+        assert!(bounded
+            .windows(2)
+            .all(|pair| pair[0].end_ms == pair[1].start_ms));
+    }
+
+    const VISA: &str = "ORDER_PAYMENT, CREDIT, CARD, VISA, USD, THREE_DS";
+    const MASTERCARD: &str = "ORDER_PAYMENT, CREDIT, CARD, MASTERCARD, USD, NO_THREE_DS";
+
+    #[test]
+    fn clusters_keep_their_own_leaders() {
+        // Stripe leads Visa and Adyen leads Mastercard the whole time, and the two clusters'
+        // snapshots arrive interleaved. Compared together they would trade the lead on every
+        // bucket; compared per cluster nothing changes.
+        let mut points = Vec::new();
+        for bucket in 0..6 {
+            let at = bucket * BUCKET;
+            points.push(clustered(VISA, at, "stripe", 95.0, 100));
+            points.push(clustered(VISA, at, "adyen", 90.0, 100));
+            points.push(clustered(MASTERCARD, at, "adyen", 94.0, 100));
+            points.push(clustered(MASTERCARD, at, "stripe", 88.0, 100));
+        }
+        let analysis = analyze(&points, &query(), (0, 6 * BUCKET));
+        assert!(analysis
+            .events
+            .iter()
+            .all(|event| event.event_type != RoutingEventType::LeaderChanged));
+
+        let leaders: Vec<(Option<&str>, Option<&str>, u32)> = analysis
+            .dimensions
+            .iter()
+            .map(|summary| {
+                (
+                    summary.sr_dimension.as_deref(),
+                    summary.leader.as_deref(),
+                    summary.leader_change_count,
+                )
+            })
+            .collect();
+        assert_eq!(
+            leaders,
+            vec![
+                (Some(MASTERCARD), Some("adyen"), 0),
+                (Some(VISA), Some("stripe"), 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_flip_names_its_cluster() {
+        let points = vec![
+            clustered(VISA, 0, "adyen", 89.0, 100),
+            clustered(VISA, 0, "stripe", 87.0, 100),
+            // Mastercard keeps reporting a high stripe score; it must not count for Visa.
+            clustered(MASTERCARD, 0, "stripe", 99.0, 100),
+            clustered(VISA, BUCKET, "stripe", 92.0, 100),
+            clustered(VISA, BUCKET, "adyen", 89.0, 100),
+        ];
+        let analysis = analyze(&points, &query(), (0, 2 * BUCKET));
+        let flips: Vec<&RoutingEvent> = analysis
+            .events
+            .iter()
+            .filter(|event| event.event_type == RoutingEventType::LeaderChanged)
+            .collect();
+        assert_eq!(flips.len(), 1);
+        assert_eq!(flips[0].sr_dimension.as_deref(), Some(VISA));
+        assert_eq!(flips[0].previous_gateway.as_deref(), Some("adyen"));
+        assert_eq!(flips[0].gateway, "stripe");
+        assert!(flips[0].id.contains(&format!("[{VISA}]")));
+    }
+
+    #[test]
+    fn snapshots_without_a_cluster_keep_the_payment_method_grouping() {
+        // Rows recorded before the cluster was keep the IDs and grouping they had.
+        let points = vec![
+            point(0, "adyen", 89.0, 100),
+            point(0, "stripe", 87.0, 100),
+            point(BUCKET, "stripe", 90.0, 100),
+        ];
+        let analysis = analyze(&points, &query(), (0, 2 * BUCKET));
+        assert_eq!(analysis.dimensions.len(), 1);
+        assert_eq!(analysis.dimensions[0].sr_dimension, None);
+        let flip = analysis
+            .events
+            .iter()
+            .find(|event| event.event_type == RoutingEventType::LeaderChanged)
+            .expect("flip");
+        assert_eq!(flip.sr_dimension, None);
+        assert_eq!(
+            flip.id,
+            "leader_changed:m_123:card:credit:300000:adyen>stripe"
+        );
+    }
+
+    #[test]
+    fn trend_samples_scores_and_payments_per_slot() {
+        let points = vec![
+            point(0, "stripe", 90.0, 100),
+            point(BUCKET, "adyen", 80.0, 100),
+            point(2 * BUCKET, "stripe", 91.0, 100),
+        ];
+        let analysis = analyze(&points, &query(), (0, 4 * BUCKET));
+        let trend = analysis.dimensions[0].trend.clone().expect("trend");
+        // Four buckets fit well inside the slot budget, so each slot is one bucket.
+        assert_eq!((trend.start_ms, trend.slot_ms), (0, BUCKET));
+        assert_eq!(trend.payments, vec![1, 1, 1, 0]);
+        let series: Vec<(&str, Vec<Option<f64>>)> = trend
+            .gateways
+            .iter()
+            .map(|g| (g.gateway.as_str(), g.scores.clone()))
+            .collect();
+        assert_eq!(
+            series,
+            vec![
+                ("adyen", vec![None, Some(80.0), Some(80.0), Some(80.0)]),
+                (
+                    "stripe",
+                    vec![Some(90.0), Some(90.0), Some(91.0), Some(91.0)]
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn trend_breaks_a_line_once_its_score_goes_stale() {
+        // One score at the start of a long window: it counts while fresh, then the line stops.
+        let points = vec![point(0, "stripe", 90.0, 100)];
+        let window_end = 40 * BUCKET;
+        let analysis = analyze(&points, &query(), (0, window_end));
+        let trend = analysis.dimensions[0].trend.clone().expect("trend");
+        assert!(trend.payments.len() <= ROUTING_EVENTS_TREND_SLOTS);
+        let fresh_for = staleness_horizon_ms(BUCKET);
+        let scores = &trend.gateways[0].scores;
+        for (slot, score) in scores.iter().enumerate() {
+            let slot_end = (i64::try_from(slot).expect("slot") + 1) * trend.slot_ms;
+            assert_eq!(score.is_some(), slot_end <= fresh_for, "slot {slot}");
+        }
+        assert!(scores.iter().any(Option::is_none));
+    }
+
+    #[test]
+    fn trend_starts_where_traffic_starts() {
+        // A ten-minute burst at the end of a long window keeps one slot per bucket instead of
+        // being squeezed into a couple of slots sized for the whole window.
+        let points = vec![
+            point(90 * BUCKET, "stripe", 90.0, 100),
+            point(91 * BUCKET, "adyen", 92.0, 100),
+        ];
+        let analysis = analyze(&points, &query(), (0, 92 * BUCKET));
+        let trend = analysis.dimensions[0].trend.clone().expect("trend");
+        assert_eq!((trend.start_ms, trend.slot_ms), (90 * BUCKET, BUCKET));
+        assert_eq!(trend.payments, vec![1, 1]);
+    }
+
+    #[test]
+    fn a_flip_carries_each_dimension_of_its_cluster() {
+        let fields = r#"{"auth_type":"THREE_DS","card_network":"Visa","currency":"USD"}"#;
+        let visa = |at, gateway, score| ScoreBucketPoint {
+            sr_dimensions: fields.to_string(),
+            ..clustered(VISA, at, gateway, score, 100)
+        };
+        let points = vec![
+            visa(0, "adyen", 89.0),
+            visa(0, "stripe", 87.0),
+            visa(BUCKET, "stripe", 92.0),
+        ];
+        let analysis = analyze(&points, &query(), (0, 2 * BUCKET));
+        let flip = analysis
+            .events
+            .iter()
+            .find(|event| event.event_type == RoutingEventType::LeaderChanged)
+            .expect("flip");
+        assert_eq!(
+            (
+                flip.card_network.as_deref(),
+                flip.currency.as_deref(),
+                flip.auth_type.as_deref(),
+                flip.country.as_deref(),
+            ),
+            (Some("Visa"), Some("USD"), Some("THREE_DS"), None)
+        );
     }
 }

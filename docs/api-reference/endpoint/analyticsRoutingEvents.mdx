@@ -52,24 +52,86 @@ curl "$BASE_URL/analytics/routing-events?range=1d&payment_method_type=CARD" \
 
 ## Response
 
+A real response for one hour of a merchant's CREDIT / CARD traffic, in which stripe's success rate fell after a run of failures and adyen took over:
+
 ```json
 {
   "merchant_id": "merchant_demo",
-  "range": "1d",
-  "generated_at_ms": 1784271600000,
+  "range": "1h",
   "events": [
     {
-      "id": "evt_a1b2c3",
+      "id": "leader_changed:merchant_demo:CREDIT:CARD:1795784719000:stripe>adyen",
       "event_type": "leader_changed",
       "merchant_id": "merchant_demo",
-      "payment_method_type": "CARD",
-      "payment_method": "CREDIT",
-      "bucket_ms": 1784268000000,
+      "payment_method_type": "CREDIT",
+      "payment_method": "CARD",
+      "bucket_ms": 1795784719000,
       "gateway": "adyen",
       "previous_gateway": "stripe",
-      "score": 0.91,
-      "previous_score": 0.885,
-      "transaction_count": 214
+      "score": 1,
+      "previous_score": 0.9,
+      "transaction_count": 20,
+      "leader_change_reason": "overtaken",
+      "score_before": 1,
+      "previous_score_before": 1
+    }
+  ],
+  "generated_at_ms": 1795784722082,
+  "window_start_ms": 1795781122059,
+  "window_end_ms": 1795784722059,
+  "dimensions": [
+    {
+      "payment_method_type": "CREDIT",
+      "payment_method": "CARD",
+      "leader": "adyen",
+      "leader_since_ms": 1795784719000,
+      "leader_at_window_start": null,
+      "timeline": [
+        {
+          "gateway": null,
+          "start_ms": 1795781122059,
+          "end_ms": 1795784715000
+        },
+        {
+          "gateway": "stripe",
+          "start_ms": 1795784715000,
+          "end_ms": 1795784719000
+        },
+        {
+          "gateway": "adyen",
+          "start_ms": 1795784719000,
+          "end_ms": 1795784722059
+        }
+      ],
+      "leader_change_count": 1,
+      "leadership": [
+        {
+          "gateway": "stripe",
+          "leader_ms": 4000
+        },
+        {
+          "gateway": "adyen",
+          "leader_ms": 3059
+        }
+      ],
+      "no_leader_ms": 3592941,
+      "standings": [
+        {
+          "gateway": "adyen",
+          "score": 1,
+          "transaction_count": 20,
+          "last_seen_ms": 1795784717000,
+          "eligible": true
+        },
+        {
+          "gateway": "stripe",
+          "score": 0.7,
+          "transaction_count": 20,
+          "last_seen_ms": 1795784720000,
+          "eligible": true
+        }
+      ],
+      "last_activity_ms": 1795784720000
     }
   ]
 }
@@ -80,6 +142,11 @@ curl "$BASE_URL/analytics/routing-events?range=1d&payment_method_type=CARD" \
 - Analytics reads are ClickHouse-backed and merchant-scoped by the authenticated context.
 - `event_type` is one of `leader_changed`, `gateway_entered_auth_band`, `gateway_exited_auth_band`, or `calibration_applied`.
 - `calibration_applied` events come from [Autopilot](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/merchant-features.mdx) re-tuning SR hedging/bucket size and carry `bucket_size`/`previous_bucket_size` instead of the score fields.
+- `leader_changed` events also say why the lead moved. `leader_change_reason` is `overtaken` when the new leader beat a still-eligible incumbent by at least `min_score_delta`, or `incumbent_stale` when the incumbent stopped being eligible (no score within the staleness horizon, or fewer than `min_transaction_count` transactions) and the best eligible gateway took over without beating it. `score_before` and `previous_score_before` are both gateways' scores in the bucket before the flip, so a falling incumbent can be told apart from an improving challenger.
+- `dimensions` summarises each payment method over the whole window and is not capped by `limit`: the current `leader` and when it took over, the leader when the window opened, a `timeline` of who led when (with `gateway: null` for stretches without fresh scores; at most 480 stretches, resampled into equal slots beyond that), `leader_change_count`, the time each gateway led (`leadership`), the time no gateway had a fresh, eligible score (`no_leader_ms`), and every gateway's latest score (`standings`). `leadership` plus `no_leader_ms` adds up to the window, `window_end_ms - window_start_ms`.
+- Leaders are tracked per SR v3 cluster: the combination of payment method and the merchant's configured SR dimensions (card network, currency, country, auth type, BIN, UDFs) that scores are kept under. `sr_dimension` on a `leader_changed` event and on each `dimensions` entry names it, with the same value `/decide` reports as the success-rate dimension, for example `ORDER_PAYMENT, DEBIT, CARD, VISA, USD, THREE_DS`. A Visa and a Mastercard cluster of the same payment method therefore have separate leaders and never trade the lead with each other. Each `leader_changed` event also carries the cluster's configured dimensions one by one (`card_network`, `currency`, `country`, `auth_type`, `card_is_in`), the same fields `calibration_applied` events use, so a client can put a leader change and an Autopilot retune of the same cluster side by side. Scores recorded before clusters were have no `sr_dimension` and are tracked per payment method.
+- Each `dimensions` entry also carries a `trend` for charting: from where that cluster's traffic starts in the window (or the window start when scores carry over), up to 120 equal slots (`start_ms`, `slot_ms`), with the score updates in each slot (`payments`, one per payment outcome) and each gateway's latest fresh score at each slot's end (`gateways[].scores`, `null` where the gateway had no score within the staleness horizon).
+- The newer fields (`leader_change_reason`, `score_before`, `previous_score_before`, `sr_dimension`, `trend`, `window_start_ms`, `window_end_ms`, `dimensions`) are omitted when they have no value, so existing clients are unaffected.
 
 ## Related
 

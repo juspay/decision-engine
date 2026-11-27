@@ -157,7 +157,11 @@ data:
         route Nullable(String),
         details Nullable(String),
         created_at_ms Int64,
-        created_at DateTime64(3, 'UTC') MATERIALIZED fromUnixTimestamp64Milli(created_at_ms)
+        created_at DateTime64(3, 'UTC') MATERIALIZED fromUnixTimestamp64Milli(created_at_ms),
+        -- The SR v3 cluster a score snapshot belongs to and its dimensions, taken from details once
+        -- at insert so routing events group by them without reading the much larger details column.
+        sr_dimension LowCardinality(String) MATERIALIZED ifNull(JSONExtractString(details, 'sr_dimension'), ''),
+        sr_dimensions LowCardinality(String) MATERIALIZED ifNull(JSONExtractRaw(details, 'sr_dimensions'), '')
     ) ENGINE = ReplacingMergeTree(event_id)
     PARTITION BY toYYYYMM(created_at)
     ORDER BY (
@@ -175,6 +179,12 @@ data:
         event_id
     )
     TTL created_at + INTERVAL 18 MONTH;
+
+    -- Tables created before the SR cluster columns existed get them on the next install or
+    -- upgrade, a no-op otherwise.
+    ALTER TABLE {{ .Values.analytics.clickhouse.database }}.analytics_domain_events
+        ADD COLUMN IF NOT EXISTS sr_dimension LowCardinality(String) MATERIALIZED ifNull(JSONExtractString(details, 'sr_dimension'), ''),
+        ADD COLUMN IF NOT EXISTS sr_dimensions LowCardinality(String) MATERIALIZED ifNull(JSONExtractRaw(details, 'sr_dimensions'), '');
 
     CREATE TABLE IF NOT EXISTS {{ .Values.analytics.clickhouse.database }}.analytics_domain_events_parse_errors (
         topic String,

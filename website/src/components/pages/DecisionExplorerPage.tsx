@@ -14,6 +14,7 @@ import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 import { useAuthStore } from '../../store/authStore'
+import { fixedConnectorColor } from '../../lib/connectorColors'
 import { apiErrorStatus, apiPost, fetcher } from '../../lib/api'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
 import { DecideGatewayResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, RankedPsp, UpdateScoreResponse } from '../../types/api'
@@ -1810,10 +1811,17 @@ export function DecisionExplorerPage() {
     [form.eligible_gateways],
   )
 
-  const gatewayColorMap = useMemo(
-    () => Object.fromEntries(eligibleGatewaysParsed.map((gw, i) => [gw, GW_PALETTE[i % GW_PALETTE.length]])),
-    [eligibleGatewaysParsed],
-  )
+  // Connectors with a shared fixed colour keep it (the same as on the other pages); the rest take
+  // the positional palette, skipping any colour a fixed one already holds.
+  const gatewayColorMap = useMemo(() => {
+    const used = new Set(eligibleGatewaysParsed.map(fixedConnectorColor).filter(Boolean))
+    const free = GW_PALETTE.filter((color) => !used.has(color))
+    const palette = free.length ? free : GW_PALETTE
+    let next = 0
+    return Object.fromEntries(
+      eligibleGatewaysParsed.map((gw) => [gw, fixedConnectorColor(gw) ?? palette[next++ % palette.length]]),
+    )
+  }, [eligibleGatewaysParsed])
 
   // Auto-populate errorInfo for any gateway whose config has no error code yet,
   // once GSM rules have loaded from the API.

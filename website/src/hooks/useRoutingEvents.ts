@@ -12,10 +12,16 @@ import {
 import useSWR from 'swr'
 import { fetcher } from '../lib/api'
 import { useAuthStore } from '../store/authStore'
-import { AnalyticsRangeValue, RoutingEvent, RoutingEventsResponse } from '../types/api'
+import {
+  AnalyticsRangeValue,
+  RoutingDimensionSummary,
+  RoutingEvent,
+  RoutingEventsResponse,
+} from '../types/api'
+import { calibrationClusterLabel, describeCalibrationChange } from '../lib/routingEventInsights'
 
 // Every poll re-reads the last hour of score snapshots from ClickHouse, per open tab.
-const POLL_INTERVAL_MS = 5_000
+export const POLL_INTERVAL_MS = 5_000
 const SEEN_STORAGE_PREFIX = 'routing_events_seen'
 const MAX_SEEN_IDS = 500
 
@@ -31,9 +37,36 @@ function bucketForRange(range: AnalyticsRangeValue): string {
   return range === '15m' || range === '1h' ? '1s' : '1m'
 }
 
+// Mirrors the server's DEFAULT_ROUTING_EVENTS_LIMIT. The feed requests the default, so a
+// response this long may be truncated; the per-dimension summary is not.
+export const ROUTING_EVENTS_DEFAULT_LIMIT = 50
+
 function routingEventsKey(merchantId: string, range: AnalyticsRangeValue): string | null {
   if (!merchantId) return null
   return `/analytics/routing-events?range=${range}&bucket=${bucketForRange(range)}`
+}
+
+/** Whether a range is scanned at per-second granularity (longer ranges use 1-minute buckets). */
+export function isPerSecondRange(range: AnalyticsRangeValue): boolean {
+  return bucketForRange(range) === '1s'
+}
+
+/** The window-wide extras newer servers send alongside the events. */
+export interface RoutingEventsSummary {
+  dimensions: RoutingDimensionSummary[]
+  windowStartMs: number
+  windowEndMs: number
+}
+
+function summaryOf(response: RoutingEventsResponse | undefined): RoutingEventsSummary | null {
+  if (!response?.dimensions || response.window_start_ms == null || response.window_end_ms == null) {
+    return null
+  }
+  return {
+    dimensions: response.dimensions,
+    windowStartMs: response.window_start_ms,
+    windowEndMs: response.window_end_ms,
+  }
 }
 
 function seenStorageKey(merchantId: string) {
@@ -65,6 +98,7 @@ function persistSeenIds(merchantId: string, ids: Set<string>) {
 
 interface RoutingEventsContextValue {
   liveEvents: RoutingEvent[]
+  liveSummary: RoutingEventsSummary | null
   isLoading: boolean
   isUnavailable: boolean
   isSeen: (id: string) => boolean
@@ -157,9 +191,12 @@ export function RoutingEventsProvider({ children }: { children: ReactNode }) {
     [error, data],
   )
 
+  const liveSummary = useMemo(() => (error ? null : summaryOf(data)), [error, data])
+
   const value = useMemo<RoutingEventsContextValue>(
     () => ({
       liveEvents,
+      liveSummary,
       isLoading,
       isUnavailable: Boolean(error),
       isSeen,
@@ -168,7 +205,7 @@ export function RoutingEventsProvider({ children }: { children: ReactNode }) {
       requestPollInterval,
       subscribe,
     }),
-    [liveEvents, isLoading, error, isSeen, markSeen, refresh, requestPollInterval, subscribe],
+    [liveEvents, liveSummary, isLoading, error, isSeen, markSeen, refresh, requestPollInterval, subscribe],
   )
 
   return createElement(RoutingEventsContext.Provider, { value }, children)
@@ -201,6 +238,7 @@ export function useRoutingEvents(
   const merchantId = useAuthStore((state) => state.user?.merchantId) ?? ''
   const {
     liveEvents,
+    liveSummary,
     isLoading: liveLoading,
     isUnavailable: liveUnavailable,
     isSeen,
@@ -238,6 +276,9 @@ export function useRoutingEvents(
   )
 
   const events = isLive ? liveEvents : error ? [] : data?.events ?? []
+  const rangeSummary = useMemo(() => (error ? null : summaryOf(data)), [error, data])
+  // Null when the server predates the summary; callers fall back to deriving one from events.
+  const summary = isLive ? liveSummary : rangeSummary
   const isLoading = isLive ? liveLoading : rangeLoading
   const isUnavailable = isLive ? liveUnavailable : Boolean(error)
 
@@ -262,6 +303,7 @@ export function useRoutingEvents(
 
   return {
     events,
+    summary,
     unseenEvents,
     unseenCount: unseenEvents.length,
     markAllSeen,
@@ -274,7 +316,9 @@ export function useRoutingEvents(
 export function describeRoutingEvent(event: RoutingEvent): string {
   switch (event.event_type) {
     case 'leader_changed':
-      return `switching psp to ${event.gateway}`
+      return event.previous_gateway
+        ? `${event.gateway} took over from ${event.previous_gateway}`
+        : `${event.gateway} took the lead`
     case 'gateway_entered_auth_band':
       // Score is now within tolerance of the top PSP, so the engine can route to
       // it for cost savings despite a slightly lower success rate.
@@ -286,37 +330,7 @@ export function describeRoutingEvent(event: RoutingEvent): string {
   }
 }
 
-// Human-readable summary of an autopilot calibration retune: which cluster, and how the
-// bucket size / hedging % moved. Shows "→" deltas when a previous value is known (an update)
-// and a plain "set" when the autopilot first created the cluster's override.
+// An autopilot retune in plain words: the cluster it applies to and the settings that moved.
 function describeCalibration(event: RoutingEvent): string {
-  const dims = [
-    event.payment_method_type,
-    event.payment_method,
-    event.card_network,
-    event.currency,
-    event.country,
-    event.auth_type,
-  ].filter((d): d is string => Boolean(d))
-  const cluster = dims.length ? dims.join(' · ') : 'default'
-
-  const parts: string[] = []
-  if (event.bucket_size != null) {
-    parts.push(
-      event.previous_bucket_size != null && event.previous_bucket_size !== event.bucket_size
-        ? `bucket ${event.previous_bucket_size} → ${event.bucket_size}`
-        : `bucket ${event.bucket_size}`,
-    )
-  }
-  if (event.hedging_percent != null) {
-    const hedge = `${event.hedging_percent.toFixed(1)}%`
-    parts.push(
-      event.previous_hedging_percent != null &&
-        event.previous_hedging_percent !== event.hedging_percent
-        ? `hedging ${event.previous_hedging_percent.toFixed(1)}% → ${hedge}`
-        : `hedging ${hedge}`,
-    )
-  }
-  const change = parts.length ? parts.join(', ') : 'settings'
-  return `autopilot tuned ${cluster} — ${change}`
+  return `Autopilot retuned ${calibrationClusterLabel(event)}: ${describeCalibrationChange(event)}`
 }

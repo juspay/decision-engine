@@ -2578,25 +2578,41 @@ pub(crate) fn sr_key_components(
             .into_owned(),
         gateway_scoring_data.instrument.method_code().to_string(),
     ]);
-    for field in fields {
-        let value = match field.as_str() {
-            "card_network" => gateway_scoring_data.cardSwitchProvider.clone(),
-            "card_is_in" => gateway_scoring_data.cardIsIn.clone(),
-            "currency" => gateway_scoring_data
-                .currency
-                .as_ref()
-                .map(ToString::to_string),
-            "country" => gateway_scoring_data
-                .country
-                .as_ref()
-                .map(ToString::to_string),
-            "auth_type" => gateway_scoring_data.authType.clone(),
-            _ => None,
-        };
-        key_components.extend(value);
-    }
+    key_components.extend(
+        sr_dimension_values(gateway_scoring_data, fields)
+            .into_iter()
+            .map(|(_, value)| value),
+    );
     key_components.extend(udf_values.into_iter().flatten());
     key_components
+}
+
+/// The configured dimensions a payment's scores are keyed on, by field name and in key order.
+/// Fields the payment has no value for are left out, as the key leaves them out.
+pub(crate) fn sr_dimension_values(
+    gateway_scoring_data: &GatewayScoringData,
+    fields: &[String],
+) -> Vec<(String, String)> {
+    fields
+        .iter()
+        .filter_map(|field| {
+            let value = match field.as_str() {
+                "card_network" => gateway_scoring_data.cardSwitchProvider.clone(),
+                "card_is_in" => gateway_scoring_data.cardIsIn.clone(),
+                "currency" => gateway_scoring_data
+                    .currency
+                    .as_ref()
+                    .map(ToString::to_string),
+                "country" => gateway_scoring_data
+                    .country
+                    .as_ref()
+                    .map(ToString::to_string),
+                "auth_type" => gateway_scoring_data.authType.clone(),
+                _ => None,
+            };
+            value.map(|value| (field.clone(), value))
+        })
+        .collect()
 }
 
 pub async fn get_unified_sr_key(
@@ -2605,6 +2621,60 @@ pub async fn get_unified_sr_key(
     enforce1d: bool,
     decider_flow: Option<&mut DeciderFlow<'_>>,
 ) -> String {
+    let UnifiedSrKey {
+        key,
+        cluster,
+        udf_values,
+        ..
+    } = unified_sr_key(gateway_scoring_data, is_sr_v3_metric_enabled, enforce1d).await;
+
+    if let Some(df) = decider_flow {
+        if let Some(udf_values) = udf_values.as_ref() {
+            if udf_values.len() == 1 {
+                df.writer.gateway_scoring_data.udfs_consumed_for_routing =
+                    Some(udf_values[0].clone());
+            }
+        }
+        if let Some(cluster) = cluster {
+            set_routing_dimension(df, cluster);
+        }
+    }
+
+    key
+}
+
+/// The SR v3 cluster a payment's scores are kept under.
+pub struct SrV3Cluster {
+    /// The dimensions it keyed on, e.g. "ORDER_PAYMENT, DEBIT, CARD, VISA, USD, THREE_DS": the
+    /// same value `/decide` reports as the success-rate dimension.
+    pub label: String,
+    /// The merchant's configured dimensions among them, by field name (`card_network`,
+    /// `currency`, `country`, `auth_type`, `card_is_in`), so each can be read on its own.
+    pub dimensions: Vec<(String, String)>,
+}
+
+/// The SR v3 cluster a payment's scores are kept under. `None` on the legacy
+/// `/decision_gateway` key, which reads no configured dimensions.
+pub async fn get_sr_v3_cluster(gateway_scoring_data: &GatewayScoringData) -> Option<SrV3Cluster> {
+    let key = unified_sr_key(gateway_scoring_data, true, false).await;
+    key.cluster.map(|label| SrV3Cluster {
+        label,
+        dimensions: key.dimension_values,
+    })
+}
+
+struct UnifiedSrKey {
+    key: String,
+    cluster: Option<String>,
+    dimension_values: Vec<(String, String)>,
+    udf_values: Option<Vec<String>>,
+}
+
+async fn unified_sr_key(
+    gateway_scoring_data: &GatewayScoringData,
+    is_sr_v3_metric_enabled: bool,
+    enforce1d: bool,
+) -> UnifiedSrKey {
     let merchant_id = gateway_scoring_data.merchantId.clone();
 
     let name = crate::types::service_configuration::SrDimensions::name(&merchant_id);
@@ -2640,7 +2710,7 @@ pub async fn get_unified_sr_key(
 
     // The legacy key predates the configured dimensions and never reads them, so it reports no
     // cluster. Only `/decision_gateway` takes that path.
-    let (key, cluster) = if is_legacy_decider_flow {
+    let (key, cluster, dimension_values) = if is_legacy_decider_flow {
         let sr_keys =
             get_legacy_unified_sr_key(gateway_scoring_data, is_sr_v3_metric_enabled, enforce1d)
                 .await;
@@ -2652,7 +2722,7 @@ pub async fn get_unified_sr_key(
         } else {
             sr_keys
         };
-        (sr_key_with_udfs, None)
+        (sr_key_with_udfs, None, Vec::new())
     } else {
         let fields: Vec<String> = service_config
             .as_ref()
@@ -2667,22 +2737,19 @@ pub async fn get_unified_sr_key(
             &fields,
             udf_values.clone(),
         );
-        (sr_key(&components), Some(sr_cluster(&components)))
+        (
+            sr_key(&components),
+            Some(sr_cluster(&components)),
+            sr_dimension_values(gateway_scoring_data, &fields),
+        )
     };
 
-    if let Some(df) = decider_flow {
-        if let Some(udf_values) = udf_values.as_ref() {
-            if udf_values.len() == 1 {
-                df.writer.gateway_scoring_data.udfs_consumed_for_routing =
-                    Some(udf_values[0].clone());
-            }
-        }
-        if let Some(cluster) = cluster {
-            set_routing_dimension(df, cluster);
-        }
+    UnifiedSrKey {
+        key,
+        cluster,
+        dimension_values,
+        udf_values,
     }
-
-    key
 }
 
 async fn get_legacy_unified_sr_key(

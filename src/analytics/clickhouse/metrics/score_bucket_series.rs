@@ -20,9 +20,18 @@ pub struct ScoreBucketPoint {
     pub merchant_id: Option<String>,
     pub payment_method_type: Option<String>,
     pub payment_method: Option<String>,
+    /// The SR v3 cluster the score belongs to, e.g. "ORDER_PAYMENT, DEBIT, CARD, VISA, USD,
+    /// THREE_DS" (what `/decide` reports as the success-rate dimension). Empty on snapshots
+    /// written before the cluster was recorded, which then group by payment method alone.
+    pub sr_dimension: String,
+    /// That cluster's configured dimensions as a JSON object by field name, e.g.
+    /// `{"card_network":"Visa","currency":"USD"}`; empty when not recorded.
+    pub sr_dimensions: String,
     pub gateway: Option<String>,
     pub score_value: Option<f64>,
     pub transaction_count: Option<i64>,
+    /// Score snapshots in the bucket: one per payment outcome fed back for this gateway.
+    pub update_count: u64,
 }
 
 pub async fn load(
@@ -44,9 +53,13 @@ pub async fn load(
         "merchant_id",
         "payment_method_type",
         "payment_method",
+        // Materialized from `details` at insert, so the much larger `details` column is not read.
+        "sr_dimension",
+        "sr_dimensions",
         "gateway",
         "argMax(score_value, created_at_ms) AS score_value",
         "argMax(transaction_count, created_at_ms) AS transaction_count",
+        "count() AS update_count",
     ]);
     builder.extend_filters(base_window_filters(start_ms, end_ms));
     builder.add_filter(FilterClause::eq("merchant_id", query.merchant_id.clone()));
@@ -65,6 +78,8 @@ pub async fn load(
         "merchant_id",
         "payment_method_type",
         "payment_method",
+        "sr_dimension",
+        "sr_dimensions",
         "gateway",
     ]);
     builder.add_order_by(OrderClause::asc("bucket_ms"));
