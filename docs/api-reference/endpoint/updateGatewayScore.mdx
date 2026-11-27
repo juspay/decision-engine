@@ -49,6 +49,43 @@ curl --location "$BASE_URL/update-gateway-score" \
 }'
 ```
 
+### Name the connector as `/decide` returned it
+
+Send `attemptedConnector` instead of `gateway`: copy the connector the payment was attempted on
+from the `connectors` of its `/decide` response, unchanged.
+
+```bash
+curl --location "$BASE_URL/update-gateway-score" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{
+  "merchantId": "merchant_demo",
+  "paymentId": "pay_sr_001",
+  "attemptedConnector": { "connector": "stripe", "merchant_connector_id": "mca_stripe" },
+  "status": "AUTHORIZATION_FAILED"
+}'
+```
+
+An update that sends `attemptedConnector` is checked against the payment's latest stored `/decide`
+decision before it is accepted:
+
+| Case | Answer |
+|---|---|
+| A connector the decision offered, first or a later retry | `200`, scored under `stripe:mca_stripe` |
+| Another account of the connector, a bare name (`merchant_connector_id` null), or a connector it did not offer | `422` `CONNECTOR_NOT_OFFERED`; the message lists the connectors it offered |
+| No decision is stored for the payment: routed by its rule with rule-routed scoring off, or past its scoring-context TTL (a redelivered webhook) | `200`, nothing to score, as a `gateway` update |
+| `gateway` sent too and names another connector | `400` `CONNECTOR_MISMATCH` |
+| An unknown key inside `attemptedConnector` | `400` |
+
+A payment decided again checks against its latest decision. A decision stored without a connector
+list (the decider found no connector, so the request's fallback answered), or one that cannot be read,
+is not checked. An update that sends only `gateway` is not checked
+at all and behaves as before.
+
+`attemptedConnector` is the connector account `/decide` returned. It is unrelated to
+`gatewayReferenceId`, which only splits scores further for merchants with gateway-reference-id
+scoring enabled.
+
 `status` must be a transaction status value - `CHARGED`, `AUTHORIZATION_FAILED`,
 `AUTHENTICATION_FAILED`, `JUSPAY_DECLINED`, `FAILURE`, and so on. Lowercase values such as
 `success` are rejected with a 400.

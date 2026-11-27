@@ -499,8 +499,11 @@ async fn apply_guardrail_action(
     }
 }
 
+/// Scores the outcome `api_payload` reports. `context` is the payment's scoring context when the
+/// caller has already read it; otherwise it is read here.
 pub async fn check_and_update_gateway_score_(
     api_payload: FT::UpdateScorePayload,
+    context: Option<ScoringContextRead>,
 ) -> Result<String, T::ErrorResponse> {
     // Before any early return, because the guardrail needs only the payment's outcome and must
     // not be gated on the GSM scoring filter or on GatewayScoringData still being cached.
@@ -582,28 +585,19 @@ pub async fn check_and_update_gateway_score_(
         );
     }
 
-    let redis_key = scoring_data_redis_key(&api_payload.merchant_id, &api_payload.payment_id).await;
-    let app_state = get_tenant_app_state().await;
+    let ScoringContextRead { redis_key, context } = match context {
+        Some(read) => read,
+        None => load_scoring_context(&api_payload.merchant_id, &api_payload.payment_id).await,
+    };
 
-    // Attempt to fetch gateway scoring data from Redis
-    let m_gateway_scoring_data: Result<
-        GatewayScoringData,
-        error_stack::Report<redis_interface::errors::RedisError>,
-    > = app_state
-        .redis_conn
-        .get_key::<StoredGatewayScoringData>(&redis_key, "GatewayScoringData")
-        .await
-        .map(GatewayScoringData::from);
-
-    match m_gateway_scoring_data {
-        Ok(gateway_scoring_data) => {
-            // The key is by payment id alone, so another merchant's payment is rejected untouched.
-            if gateway_scoring_data.merchantId != api_payload.merchant_id {
-                return Err(invalid_request_error(
-                    "payment_id",
-                    &"Payment does not belong to the requested merchant",
-                ));
-            }
+    match context {
+        // The key is by payment id alone, so another merchant's payment is rejected untouched.
+        ScoringContext::OtherMerchant => Err(invalid_request_error(
+            "payment_id",
+            &"Payment does not belong to the requested merchant",
+        )),
+        ScoringContext::Found(gateway_scoring_data) => {
+            let gateway_scoring_data = *gateway_scoring_data;
             // Extract transaction details and card info from the API payload
             let txn_detail: TxnDetail = match Fbu::get_txn_detail_from_api_payload(
                 api_payload.clone(),
@@ -670,47 +664,34 @@ pub async fn check_and_update_gateway_score_(
             // Return success response
             Ok("Success".to_string())
         }
-        Err(e) => {
-            // With compression on, a missing key also reads as `GetFailed`, which is otherwise a
-            // read or decode failure. Only a key confirmed absent is skipped.
-            let scoring_data_absent = match e.current_context() {
-                redis_interface::errors::RedisError::NotFound => true,
-                redis_interface::errors::RedisError::GetFailed => {
-                    matches!(app_state.redis_conn.key_exists(&redis_key).await, Ok(false))
-                }
-                _ => false,
-            };
-            if scoring_data_absent {
-                logger::info!(
-                    action = "GATEWAY_SCORING_DATA_NOT_FOUND_SKIP",
-                    tag = "GATEWAY_SCORING_DATA_NOT_FOUND_SKIP",
-                    "No GatewayScoringData in redis for merchant={} gateway={} payment_id={}; \
-                     skipping score update: {}",
-                    api_payload.merchant_id,
-                    api_payload.gateway,
-                    api_payload.payment_id,
-                    e,
-                );
-                return Ok(SCORE_UPDATE_SKIPPED.to_string());
-            }
-            Err(T::ErrorResponse {
-                status: "400".to_string(),
-                error_code: "GATEWAY_SCORING_DATA_NOT_FOUND".to_string(),
-                error_message: "GatewayScoringData is not found in redis".to_string(),
-                priority_logic_tag: None,
-                routing_approach: None,
-                filter_wise_gateways: None,
-                error_info: T::UnifiedError {
-                    code: "GATEWAY_SCORING_DATA_NOT_FOUND".to_string(),
-                    user_message:
-                        "GatewayScoringData is not in redis. Please create the transaction."
-                            .to_string(),
-                    developer_message: e.to_string(),
-                },
-                priority_logic_output: None,
-                is_dynamic_mga_enabled: false,
-            })
+        ScoringContext::Absent => {
+            logger::info!(
+                action = "GATEWAY_SCORING_DATA_NOT_FOUND_SKIP",
+                tag = "GATEWAY_SCORING_DATA_NOT_FOUND_SKIP",
+                "No GatewayScoringData in redis for merchant={} gateway={} payment_id={}; \
+                 skipping score update",
+                api_payload.merchant_id,
+                api_payload.gateway,
+                api_payload.payment_id,
+            );
+            Ok(SCORE_UPDATE_SKIPPED.to_string())
         }
+        ScoringContext::Unreadable(e) => Err(T::ErrorResponse {
+            status: "400".to_string(),
+            error_code: "GATEWAY_SCORING_DATA_NOT_FOUND".to_string(),
+            error_message: "GatewayScoringData is not found in redis".to_string(),
+            priority_logic_tag: None,
+            routing_approach: None,
+            filter_wise_gateways: None,
+            error_info: T::UnifiedError {
+                code: "GATEWAY_SCORING_DATA_NOT_FOUND".to_string(),
+                user_message: "GatewayScoringData is not in redis. Please create the transaction."
+                    .to_string(),
+                developer_message: e,
+            },
+            priority_logic_output: None,
+            is_dynamic_mga_enabled: false,
+        }),
     }
 }
 
@@ -727,6 +708,67 @@ pub(crate) async fn scoring_data_redis_key(merchant_id: &str, payment_id: &str) 
     } else {
         key
     }
+}
+
+/// What a read of a payment's scoring context found.
+pub enum ScoringContext {
+    Found(Box<GatewayScoringData>),
+    /// The context is another merchant's: older code keyed it by payment id alone.
+    OtherMerchant,
+    /// No context is stored for the payment, or it has expired.
+    Absent,
+    /// A context may exist but could not be read.
+    Unreadable(String),
+}
+
+/// One read of a payment's scoring context, and the key it was read from.
+pub struct ScoringContextRead {
+    pub redis_key: String,
+    pub context: ScoringContext,
+}
+
+impl ScoringContextRead {
+    /// The context, when one of this merchant's was found.
+    pub fn found(&self) -> Option<&GatewayScoringData> {
+        match &self.context {
+            ScoringContext::Found(data) => Some(data),
+            ScoringContext::OtherMerchant
+            | ScoringContext::Absent
+            | ScoringContext::Unreadable(_) => None,
+        }
+    }
+}
+
+/// Reads the payment's scoring context. One read serves the whole update: the attempted-connector
+/// check, smart retry and the score update.
+pub async fn load_scoring_context(merchant_id: &str, payment_id: &str) -> ScoringContextRead {
+    let redis_key = scoring_data_redis_key(merchant_id, payment_id).await;
+    let redis = &get_tenant_app_state().await.redis_conn;
+    let context = match redis
+        .get_key::<StoredGatewayScoringData>(&redis_key, "GatewayScoringData")
+        .await
+        .map(GatewayScoringData::from)
+    {
+        Ok(data) if data.merchantId == merchant_id => ScoringContext::Found(Box::new(data)),
+        Ok(_) => ScoringContext::OtherMerchant,
+        Err(e) => {
+            // With compression on, a missing key also reads as `GetFailed`, which is otherwise a
+            // read or decode failure. Only a key confirmed absent counts as absent.
+            let absent = match e.current_context() {
+                redis_interface::errors::RedisError::NotFound => true,
+                redis_interface::errors::RedisError::GetFailed => {
+                    matches!(redis.key_exists(&redis_key).await, Ok(false))
+                }
+                _ => false,
+            };
+            if absent {
+                ScoringContext::Absent
+            } else {
+                ScoringContext::Unreadable(e.to_string())
+            }
+        }
+    };
+    ScoringContextRead { redis_key, context }
 }
 
 pub async fn check_and_update_gateway_score(

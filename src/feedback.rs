@@ -1,3 +1,4 @@
+pub mod attempted_connector;
 pub mod constants;
 pub mod gateway_elimination_scoring;
 pub mod gateway_scoring_service;

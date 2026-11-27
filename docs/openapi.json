@@ -3838,6 +3838,12 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "The body could not be parsed, or `gateway` and `attemptedConnector` name different connectors (`CONNECTOR_MISMATCH`)."
+          },
+          "422": {
+            "description": "`attemptedConnector` names a connector `/decide` did not offer the payment (`CONNECTOR_NOT_OFFERED`); the message lists the connectors it offered."
           }
         },
         "security": [
@@ -6166,9 +6172,20 @@
         "type": "object",
         "required": [
           "merchantId",
-          "gateway",
           "paymentId",
           "status"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "gateway"
+            ]
+          },
+          {
+            "required": [
+              "attemptedConnector"
+            ]
+          }
         ],
         "properties": {
           "merchantId": {
@@ -6177,7 +6194,16 @@
           },
           "gateway": {
             "type": "string",
-            "example": "stripe"
+            "example": "stripe:mca_stripe",
+            "description": "The connector the outcome is for: `name:merchant_connector_id`, or the bare name for a connector without an account. Required unless `attemptedConnector` is sent; when both are sent they must name the same connector. Not checked against the payment's decision."
+          },
+          "attemptedConnector": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DecideConnector"
+              }
+            ],
+            "description": "The connector account the payment was attempted on, copied from the `connectors` of the payment's `/decide` response. When the payment has a stored decision with a connector list, the update is accepted only for a connector that decision offered: another account, a bare name, or a connector it did not offer is refused with 422 `CONNECTOR_NOT_OFFERED`. A payment without a stored decision (routed by its rule with rule-routed scoring off, or past its scoring-context TTL), or whose decision cannot be read, is not checked and is answered as a `gateway` update would be."
           },
           "paymentId": {
             "type": "string",

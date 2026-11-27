@@ -1,11 +1,9 @@
 //! Smart retry: the connectors `/update-gateway-score` suggests for a retryable failure.
 
 use crate::app::get_tenant_app_state;
-use crate::decider::gatewaydecider::types::{
-    GatewayScoringData, ScoreKeyType, StoredGatewayScoringData,
-};
+use crate::decider::gatewaydecider::types::{GatewayScoringData, ScoreKeyType};
 use crate::decider::gatewaydecider::utils as GU;
-use crate::feedback::gateway_scoring_service::{scoring_data_redis_key, update_gateway_score_lock};
+use crate::feedback::gateway_scoring_service::{update_gateway_score_lock, ScoringContextRead};
 use crate::feedback::gateway_selection_scoring_v3 as GSSV3;
 use crate::feedback::types::UpdateScorePayload;
 use crate::feedback::utils::{self as Fbu, GatewayScoringType};
@@ -23,15 +21,19 @@ impl<'a> RetryConnectors<'a> {
         Self { payload }
     }
 
-    /// The connectors to retry on; empty without a scoring context, eligible list, or anything left.
-    pub async fn find(&self) -> Vec<String> {
-        match self.load_scoring_context().await {
+    /// The connectors to retry on, from the payment's scoring `context`; empty without a context,
+    /// eligible list, or anything left.
+    pub async fn find(&self, context: &ScoringContextRead) -> Vec<String> {
+        match context.found() {
             Some(scoring_data) => {
-                let candidates = self.untried_eligible_connectors(&scoring_data).await;
+                let candidates = self.untried_eligible_connectors(scoring_data).await;
                 if candidates.len() < 2 {
                     candidates
                 } else {
-                    Self::sort_best_first(self.score_by_current_sr(scoring_data, candidates).await)
+                    Self::sort_best_first(
+                        self.score_by_current_sr(scoring_data.clone(), candidates)
+                            .await,
+                    )
                 }
             }
             None => Vec::new(),
@@ -49,20 +51,6 @@ impl<'a> RetryConnectors<'a> {
             }
         }
         candidates
-    }
-
-    /// The payment's scoring context, only if it is this merchant's.
-    async fn load_scoring_context(&self) -> Option<GatewayScoringData> {
-        let merchant_id = self.payload.merchant_id.as_str();
-        let redis_key = scoring_data_redis_key(merchant_id, &self.payload.payment_id).await;
-        get_tenant_app_state()
-            .await
-            .redis_conn
-            .get_key::<StoredGatewayScoringData>(&redis_key, "GatewayScoringData")
-            .await
-            .ok()
-            .map(GatewayScoringData::from)
-            .filter(|data| data.merchantId == merchant_id)
     }
 
     /// Whether `candidate` (`connector:mca`) is the reported gateway, with or without its mca id.

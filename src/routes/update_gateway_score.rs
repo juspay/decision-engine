@@ -21,7 +21,7 @@ use crate::custom_extractors::{Json, RequestIds, ScopedJson, ScopedJsonRejection
 
 use crate::decider::gatewaydecider::types::ErrorResponse;
 use crate::feedback::gateway_scoring_service::{
-    check_and_update_gateway_score_, SCORE_UPDATE_SKIPPED,
+    check_and_update_gateway_score_, load_scoring_context, SCORE_UPDATE_SKIPPED,
 };
 use crate::feedback::smart_retry::RetryConnectors;
 use crate::feedback::types::{UpdateScorePayload, UpdateScoreResponse};
@@ -174,6 +174,40 @@ pub async fn update_gateway_score(
                 )
             }
             .emit();
+            // The payment's scoring context, read once when a step before the response needs it and
+            // handed to the score update, so every step works from the same decision.
+            let mut context = match payload.attempted_connector {
+                Some(_) => Some(load_scoring_context(&merchant_id, &payment_id).await),
+                None => None,
+            };
+            // An update naming its attemptedConnector is only scored for a connector /decide offered.
+            let checked = match context.as_ref() {
+                Some(read) => crate::feedback::attempted_connector::check(&payload, read),
+                None => Ok(()),
+            };
+            if let Err(refusal) = checked {
+                let error_response = refusal.into_error_response(&payload);
+                crate::analytics::DomainAnalyticsEvent {
+                    merchant_id: Some(merchant_id.clone()),
+                    payment_id: Some(payment_id.clone()),
+                    gateway: Some(gateway.clone()),
+                    request_id: x_request_id.clone(),
+                    global_request_id: global_request_id.clone(),
+                    trace_id: trace_id.clone(),
+                    event_stage: Some("attempted_connector_refused".to_string()),
+                    ..crate::analytics::DomainAnalyticsEvent::error(
+                        crate::analytics::AnalyticsFlowContext::new(
+                            crate::analytics::ApiFlow::DynamicRouting,
+                            crate::analytics::FlowType::UpdateGatewayScoreError,
+                        ),
+                        crate::analytics::AnalyticsRoute::UpdateGatewayScore,
+                        error_response.error_code.clone(),
+                        error_response.error_message.clone(),
+                    )
+                }
+                .emit();
+                return Err(error_response);
+            }
             // GSM (pod rules or a Hyperswitch call) is looked up before responding, only with errorInfo.
             let mut gsm_info = match payload.error_info.as_ref() {
                 Some(error_info) => {
@@ -186,7 +220,12 @@ pub async fn update_gateway_score(
             // A retryable failure gets the connectors to retry on, so the caller need not ask again.
             if let Some(info) = gsm_info.as_mut() {
                 if info.decision == crate::gsm::GsmDecision::Retry.to_string() {
-                    info.retry_connectors = Some(RetryConnectors::new(&payload).find().await);
+                    let read = match context.take() {
+                        Some(read) => read,
+                        None => load_scoring_context(&merchant_id, &payment_id).await,
+                    };
+                    info.retry_connectors = Some(RetryConnectors::new(&payload).find(&read).await);
+                    context = Some(read);
                 }
             }
             // Marks a response enriched with a GSM rule, like `binEnrichmentFromCardInfo` for card info.
@@ -217,7 +256,7 @@ pub async fn update_gateway_score(
                     .trim_matches('"')
                     .to_string();
 
-                match check_and_update_gateway_score_(payload.clone()).await {
+                match check_and_update_gateway_score_(payload.clone(), context).await {
                     Ok(outcome) => {
                         // A payment without a scoring context had no score to update.
                         if outcome != SCORE_UPDATE_SKIPPED {
