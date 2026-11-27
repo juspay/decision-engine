@@ -300,6 +300,10 @@ impl From<RuleSelection> for RuleStatus {
 #[derive(Debug, Serialize)]
 pub struct RuleSection {
     pub status: RuleStatus,
+    /// The advanced-algorithm rule whose conditions matched. It stays set when the rule's
+    /// connectors were not all eligible, so `outcome.reason` says what became of them. Null for
+    /// other algorithm types and when no rule matched.
+    pub matched_rule: Option<String>,
     /// The algorithm's output, by `type`: `straight_through`, `priority`, `volume_split` or
     /// `volume_split_priority`.
     pub output: serde_json::Value,
@@ -320,9 +324,11 @@ impl From<RoutingEvaluateResponse> for RuleSection {
             evaluated_output,
             eligible_connectors,
             selection,
+            matched_rule,
         } = response;
         Self {
             status: selection.into(),
+            matched_rule,
             output: rename_connector_ids(output),
             selected: evaluated_output.into_iter().map(Into::into).collect(),
             eligible: eligible_connectors.into_iter().map(Into::into).collect(),
@@ -857,6 +863,7 @@ mod tests {
             evaluated_output: connectors.clone(),
             eligible_connectors: connectors,
             selection,
+            matched_rule: (selection == RuleSelection::Matched).then(|| "visa_credit".to_string()),
         }
     }
 
@@ -907,6 +914,7 @@ mod tests {
         assert_eq!(
             actual["rule"],
             json!({"status": "matched",
+                   "matched_rule": "visa_credit",
                    "output": {"type": "priority", "connectors": [stripe, adyen]},
                    "selected": [stripe, adyen], "eligible": [stripe, adyen]})
         );

@@ -351,6 +351,11 @@ pub struct RoutingEvaluateResponse {
     /// `default_selection`; `/decide` reports each one by name.
     #[serde(skip)]
     pub selection: RuleSelection,
+    /// The name of the advanced-algorithm rule whose conditions matched, even when its
+    /// connectors were then narrowed to the eligible ones. `None` for other algorithm types and
+    /// when no rule matched.
+    #[serde(skip)]
+    pub matched_rule: Option<String>,
 }
 
 /// How the rule layer arrived at its connectors.

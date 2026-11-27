@@ -120,7 +120,9 @@ async function trainScores(api: any, merchantId: string, template: DecideRequest
 function expectFieldMapParity(decide: DecideResponse, hybrid: any) {
   const rule = hybrid.static_routing
   if (rule) {
-    expect(decide.rule).toEqual({
+    // The record does not name the matched rule; the tests assert it directly.
+    const { matched_rule: _matchedRule, ...shared } = decide.rule ?? {}
+    expect(shared).toEqual({
       status: RULE_STATUS[rule.status],
       output: renameIds(rule.output),
       selected: rule.evaluated_output.map(fromLegacy),
@@ -313,6 +315,7 @@ test.describe('Decide contract (API)', () => {
       { connector: selected.gateway_name, merchant_connector_id: selected.gateway_id },
     ])
     expect(response.body.outcome).toMatchObject({ type: 'routed', strategy: 'rule', reason: 'rule_matched' })
+    expect(response.body.rule?.matched_rule).toBe('Renamed fields')
   })
 
   test('routes mandate payments by payment_type as hybrid does', async ({ api, merchant }) => {
@@ -340,9 +343,12 @@ test.describe('Decide contract (API)', () => {
     ])
 
     // A rule that tests payment_type cannot match a payment that does not send it.
+    expect(mandate.body.rule?.matched_rule).toBe('Processor token')
+
     body.payment_type = null
     const unsent = await api.raw<DecideResponse>('POST', '/decide', { body })
     expect(unsent.body.outcome).toMatchObject({ type: 'fallback', reason: 'no_rule_matched' })
+    expect(unsent.body.rule?.matched_rule).toBeNull()
   })
 
   for (const enabled of [false, true]) {
@@ -361,6 +367,8 @@ test.describe('Decide contract (API)', () => {
       const response = await api.raw<DecideResponse>('POST', '/decide', { body })
       const hybrid = await api.raw('POST', '/routing/hybrid', { body: legacyRequest(body, merchant.id) })
       expectFieldMapParity(response.body, hybrid.body)
+      // Only advanced algorithms have named rules.
+      expect(response.body.rule?.matched_rule).toBeNull()
       // With one candidate the decider has nothing to rank and keeps the default order.
       expect(response.body.outcome).toMatchObject(enabled
         ? { type: 'routed', strategy: 'candidate_order', reason: 'decider_default' }
@@ -578,6 +586,33 @@ test.describe('Decide scenarios (API)', () => {
     expect(decide.outcome).toMatchObject({ type: 'fallback', strategy: 'candidate_order', reason: 'rule_output_not_eligible' })
     expect(decide.connectors).toEqual([adyen])
     expect(decide.warnings).toEqual([warning('rule_output_not_eligible')])
+  })
+
+  test('names the matched advanced rule, even when its connectors are dropped', async ({ api, merchant }) => {
+    const created = await api.createRoutingAlgorithm(factory.advancedRoutingPayload(merchant.id, {
+      rules: [{
+        name: 'Cards to checkout', routing_type: 'priority',
+        output: { priority: [factory.gatewayConnector('checkout'), factory.gatewayConnector('stripe')] },
+        statements: [{ condition: [{ lhs: 'payment_method', comparison: 'equal', value: { type: 'enum_variant', value: 'card' }, metadata: {} }] }],
+      }],
+    }))
+    await api.activateRoutingAlgorithm(merchant.id, created.body.rule_id)
+
+    const body = decideRequest()
+    body.routing_config.eligible_connectors = [stripe, adyen, checkout]
+    let { decide } = await both(api, merchant.id, body)
+    expect(decide.outcome.reason).toBe('rule_matched')
+    expect(decide.rule).toMatchObject({ status: 'matched', matched_rule: 'Cards to checkout' })
+
+    body.routing_config.eligible_connectors = [stripe, adyen]
+    ;({ decide } = await both(api, merchant.id, body))
+    expect(decide.outcome.reason).toBe('rule_output_partially_eligible')
+    expect(decide.rule?.matched_rule).toBe('Cards to checkout')
+
+    body.routing_config.eligible_connectors = [adyen]
+    ;({ decide } = await both(api, merchant.id, body))
+    expect(decide.outcome.reason).toBe('rule_output_not_eligible')
+    expect(decide.rule?.matched_rule).toBe('Cards to checkout')
   })
 
   test('names every invalid value by its own field', async ({ api, merchant }) => {

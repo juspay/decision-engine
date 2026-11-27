@@ -10877,6 +10877,7 @@
         "additionalProperties": false,
         "required": [
           "status",
+          "matched_rule",
           "output",
           "selected",
           "eligible"
@@ -10889,6 +10890,13 @@
               "default_selection",
               "no_active_rule"
             ]
+          },
+          "matched_rule": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name of the advanced-algorithm rule whose conditions matched. It stays set when the rule's connectors were not all eligible; `outcome.reason` says what became of them. Null for other algorithm types and when no rule matched."
           },
           "output": {
             "type": "object",
