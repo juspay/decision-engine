@@ -830,6 +830,14 @@ export function PaymentAuditPage() {
   const [customEnd, setCustomEnd] = useState(() =>
     toDateTimeInputValue(initialCustomWindow.end_ms),
   )
+  // A deep link (e.g. from Routing events) carries exact millisecond bounds, but the
+  // datetime inputs only hold whole minutes. Keep the link's own bounds while the inputs
+  // still show them, so a window ending mid-minute is not cut back to the minute's start.
+  const [linkedWindow, setLinkedWindow] = useState<TimeWindow | undefined>(() =>
+    initialStartMs > 0 && initialEndMs > initialStartMs
+      ? { start_ms: initialStartMs, end_ms: initialEndMs }
+      : undefined,
+  )
   const [pageSize, setPageSize] = useState(() => parsePageSize(startupParams))
 
   useEffect(() => {
@@ -857,12 +865,20 @@ export function PaymentAuditPage() {
     setInspectorTab('summary')
     setCustomStart(toDateTimeInputValue(nextWindow.start_ms))
     setCustomEnd(toDateTimeInputValue(nextWindow.end_ms))
+    setLinkedWindow(startMs > 0 && endMs > startMs ? { start_ms: startMs, end_ms: endMs } : undefined)
   }, [navigationType, searchParams])
 
-  const customWindow = useMemo(
-    () => (range === 'custom' ? customWindowFrom(customStart, customEnd) : undefined),
-    [customEnd, customStart, range],
-  )
+  const customWindow = useMemo(() => {
+    if (range !== 'custom') return undefined
+    if (
+      linkedWindow &&
+      customStart === toDateTimeInputValue(linkedWindow.start_ms) &&
+      customEnd === toDateTimeInputValue(linkedWindow.end_ms)
+    ) {
+      return linkedWindow
+    }
+    return customWindowFrom(customStart, customEnd)
+  }, [customEnd, customStart, linkedWindow, range])
 
   const isExactSearch = Boolean(appliedFilters.paymentId || appliedFilters.requestId)
   const searchUrl =

@@ -895,6 +895,56 @@ export interface RoutingEvent {
   currency?: string | null
   country?: string | null
   auth_type?: string | null
+  /** The card BIN, when the merchant's scores are split by it. */
+  card_is_in?: string | null
+  // Present only on `leader_changed` events from servers that send them: why the lead
+  // changed hands, and both gateways' scores in the bucket before the flip.
+  leader_change_reason?: LeaderChangeReason | null
+  score_before?: number | null
+  previous_score_before?: number | null
+  // The SR v3 cluster a leader change happened in, e.g. "ORDER_PAYMENT, DEBIT, CARD, VISA, USD,
+  // THREE_DS" (the success-rate dimension `/decide` reports). Leaders are tracked per cluster.
+  sr_dimension?: string | null
+}
+
+/** `overtaken`: beat a still-eligible incumbent. `incumbent_stale`: the incumbent aged out. */
+export type LeaderChangeReason = 'overtaken' | 'incumbent_stale'
+
+/** Per-dimension SR leadership over the whole window, not truncated by the event limit. */
+/** Slot `i` covers `start_ms + i * slot_ms` up to the next slot (clipped to the window end). */
+export interface ScoreTrend {
+  start_ms: number
+  slot_ms: number
+  /** Score updates (one per payment outcome) in each slot. */
+  payments: number[]
+  /** Each gateway's latest fresh score at each slot's end; null where it had none. */
+  gateways: { gateway: string; scores: (number | null)[] }[]
+}
+
+export interface RoutingDimensionSummary {
+  payment_method_type: string | null
+  payment_method: string | null
+  /** The SR v3 cluster this summary covers; absent for scores recorded before clusters were. */
+  sr_dimension?: string | null
+  /** Each gateway's success rate and the payment volume over the window, in equal slots. */
+  trend?: ScoreTrend | null
+  leader: string | null
+  leader_since_ms: number | null
+  leader_at_window_start: string | null
+  /** Who led when, in time order, covering the window; `gateway: null` = no fresh scores. */
+  timeline: { gateway: string | null; start_ms: number; end_ms: number }[]
+  leader_change_count: number
+  leadership: { gateway: string; leader_ms: number }[]
+  /** Window time with no fresh, eligible score — no one was leading. */
+  no_leader_ms: number
+  standings: {
+    gateway: string
+    score: number
+    transaction_count: number | null
+    last_seen_ms: number
+    eligible: boolean
+  }[]
+  last_activity_ms: number | null
 }
 
 export interface RoutingEventsResponse {
@@ -902,6 +952,10 @@ export interface RoutingEventsResponse {
   range: AnalyticsRangeValue
   events: RoutingEvent[]
   generated_at_ms: number
+  // Omitted by servers that predate them.
+  window_start_ms?: number
+  window_end_ms?: number
+  dimensions?: RoutingDimensionSummary[]
 }
 
 /** What a merchant's payments in the window carried, for the payment audit's dropdown filters. */

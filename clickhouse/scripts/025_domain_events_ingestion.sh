@@ -51,7 +51,11 @@ CREATE TABLE IF NOT EXISTS analytics_domain_events (
     route Nullable(String),
     details Nullable(String),
     created_at_ms Int64,
-    created_at DateTime64(3, 'UTC') MATERIALIZED fromUnixTimestamp64Milli(created_at_ms)
+    created_at DateTime64(3, 'UTC') MATERIALIZED fromUnixTimestamp64Milli(created_at_ms),
+    -- The SR v3 cluster a score snapshot belongs to and its dimensions, taken from details once at
+    -- insert so routing events group by them without reading the much larger details column.
+    sr_dimension LowCardinality(String) MATERIALIZED ifNull(JSONExtractString(details, 'sr_dimension'), ''),
+    sr_dimensions LowCardinality(String) MATERIALIZED ifNull(JSONExtractRaw(details, 'sr_dimensions'), '')
 ) ENGINE = ReplacingMergeTree
 PARTITION BY toYYYYMM(created_at)
 ORDER BY (
@@ -64,6 +68,11 @@ ORDER BY (
 )
 TTL created_at + INTERVAL 18 MONTH
 SETTINGS allow_nullable_key = 1;
+
+-- Tables created before the SR cluster columns existed get them here, a no-op otherwise.
+ALTER TABLE analytics_domain_events
+    ADD COLUMN IF NOT EXISTS sr_dimension LowCardinality(String) MATERIALIZED ifNull(JSONExtractString(details, 'sr_dimension'), ''),
+    ADD COLUMN IF NOT EXISTS sr_dimensions LowCardinality(String) MATERIALIZED ifNull(JSONExtractRaw(details, 'sr_dimensions'), '');
 
 DROP TABLE IF EXISTS analytics_payment_audit_summary_buckets_mv;
 DROP TABLE IF EXISTS analytics_payment_audit_summary_buckets;

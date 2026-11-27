@@ -1034,6 +1034,11 @@ pub const DEFAULT_ROUTING_EVENTS_MIN_TXN_COUNT: i64 = 10;
 pub const DEFAULT_ROUTING_EVENTS_MIN_SCORE_DELTA: f64 = 0.01;
 pub const DEFAULT_ROUTING_EVENTS_LIMIT: usize = 50;
 pub const MAX_ROUTING_EVENTS_LIMIT: usize = 200;
+/// Most stretches a dimension's leadership timeline carries; past it the window is resampled
+/// into this many equal slots, so a dimension that flapped all week stays a bounded payload.
+pub const ROUTING_EVENTS_MAX_TIMELINE_SPANS: usize = 480;
+/// Slots a summary's success-rate trend is sampled into, whatever the window length.
+pub const ROUTING_EVENTS_TREND_SLOTS: usize = 120;
 
 /// `event_stage` marker written on the domain-event rows the SR auto-calibrator emits,
 /// and the filter the routing-events detector reads them back by. Single source of truth
@@ -1096,6 +1101,39 @@ pub struct RoutingEvent {
     pub country: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth_type: Option<String>,
+    /// The card BIN, when the merchant's scores are split by it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card_is_in: Option<String>,
+    // Leader-change-only context (all `None` for the other event types).
+    /// Why the lead changed hands: the new leader beat a still-eligible incumbent by the
+    /// required margin, or the incumbent aged out (no fresh score / too few transactions)
+    /// and the lead passed on without being beaten.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leader_change_reason: Option<LeaderChangeReason>,
+    /// The new leader's score in the bucket before the flip, so a client can tell an
+    /// improving challenger from a falling incumbent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score_before: Option<f64>,
+    /// The outgoing leader's score in the bucket before the flip (`previous_score` is its
+    /// score at the flip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_score_before: Option<f64>,
+    /// The SR v3 cluster a leader change happened in, e.g. "ORDER_PAYMENT, DEBIT, CARD, VISA,
+    /// USD, THREE_DS": the same value `/decide` reports as the success-rate dimension. Leaders
+    /// are tracked per cluster, since each cluster has its own scores. Absent for scores
+    /// recorded before clusters were, which are tracked per payment method.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sr_dimension: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LeaderChangeReason {
+    /// A still-eligible incumbent was beaten by at least `min_score_delta`.
+    Overtaken,
+    /// The incumbent stopped being eligible (score older than the staleness horizon or
+    /// below `min_transaction_count`), so the best eligible gateway took over.
+    IncumbentStale,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1104,6 +1142,97 @@ pub struct RoutingEventsResponse {
     pub range: String,
     pub events: Vec<RoutingEvent>,
     pub generated_at_ms: i64,
+    /// The window the feed and `dimensions` cover. Omitted by servers that predate them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_start_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_end_ms: Option<i64>,
+    /// Per-dimension leadership over the whole window, computed from the same score series
+    /// as the leader-change events but not truncated by `limit`. Omitted when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dimensions: Vec<RoutingDimensionSummary>,
+}
+
+/// Success-rate leadership for one (payment_method_type, payment_method) dimension.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RoutingDimensionSummary {
+    pub payment_method_type: Option<String>,
+    pub payment_method: Option<String>,
+    /// Each gateway's success rate and the payment volume over the window, sampled into at most
+    /// `ROUTING_EVENTS_TREND_SLOTS` equal slots, so a client can draw why and how safely the
+    /// leader led. Omitted when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trend: Option<ScoreTrend>,
+    /// The SR v3 cluster this summary covers (see `RoutingEvent::sr_dimension`). Absent for
+    /// scores recorded before clusters were, summarised per payment method.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sr_dimension: Option<String>,
+    /// The leader the detector last reported (the same one leader-change events track).
+    pub leader: Option<String>,
+    /// When `leader` took the lead, if that happened inside the window.
+    pub leader_since_ms: Option<i64>,
+    /// Who led when the window opened, from the lookback before it; `None` when no gateway
+    /// had a fresh, eligible score then.
+    pub leader_at_window_start: Option<String>,
+    /// Who led when, in time order, covering the whole window; `gateway: None` marks
+    /// stretches with no fresh, eligible score. At most
+    /// `ROUTING_EVENTS_MAX_TIMELINE_SPANS` long.
+    pub timeline: Vec<LeadershipSpan>,
+    /// Every leader change in the window, regardless of the event `limit`.
+    pub leader_change_count: u32,
+    /// Time each gateway spent as leader inside the window, longest first.
+    pub leadership: Vec<GatewayLeadership>,
+    /// Window time with no eligible gateway — no fresh scores, so no one was leading.
+    pub no_leader_ms: i64,
+    /// Every gateway's latest score at the end of the window, best first.
+    pub standings: Vec<GatewayStanding>,
+    /// The newest score snapshot seen for this dimension.
+    pub last_activity_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LeadershipSpan {
+    /// The leader over `[start_ms, end_ms)`; `None` when no gateway had a fresh, eligible score.
+    pub gateway: Option<String>,
+    pub start_ms: i64,
+    pub end_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GatewayLeadership {
+    pub gateway: String,
+    pub leader_ms: i64,
+}
+
+/// A summary's trend: slot `i` covers `[start_ms + i * slot_ms, start_ms + (i + 1) * slot_ms)`,
+/// clipped to the window end.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ScoreTrend {
+    pub start_ms: i64,
+    pub slot_ms: i64,
+    /// Score updates (one per payment outcome) recorded in each slot.
+    pub payments: Vec<u64>,
+    /// One series per gateway seen in the window, in name order.
+    pub gateways: Vec<GatewayTrend>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GatewayTrend {
+    pub gateway: String,
+    /// The gateway's latest score at each slot's end, or `None` when it had no fresh score
+    /// then (nothing within the staleness horizon), so a line breaks instead of guessing.
+    pub scores: Vec<Option<f64>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GatewayStanding {
+    pub gateway: String,
+    pub score: f64,
+    pub transaction_count: Option<i64>,
+    pub last_seen_ms: i64,
+    /// Whether the gateway could lead at the end of the window (fresh score with enough
+    /// transactions).
+    pub eligible: bool,
 }
 
 /// How the historical routing-events detector computes the auth band a non-leader

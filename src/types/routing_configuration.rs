@@ -74,6 +74,36 @@ impl SuccessRateData {
         }
         Ok(self)
     }
+
+    /// Applies an update without touching the autopilot's rows. Rows marked `source: autopilot`
+    /// belong to the auto-calibrator, which retunes them in place and treats a missing row as a
+    /// cluster it has never tuned. A caller's copy of them is a snapshot that may be stale (a
+    /// form loaded before the last retune) or absent (a client that only sends its own rows), so
+    /// the stored autopilot rows are kept and the caller's are ignored. A human row for the same
+    /// cluster takes it over, as the calibrator never touches human rows. Hard refresh, which
+    /// clears autopilot rows on purpose, writes the config directly and is unaffected.
+    pub fn keeping_autopilot_rows(mut self, stored: Option<&Self>) -> Self {
+        let is_autopilot = |row: &SRSubLevelInputConfig| {
+            row.source.as_deref() == Some(crate::sr_auto_calibration::AUTOPILOT_SOURCE)
+        };
+        let mut rows: Vec<SRSubLevelInputConfig> = self
+            .sub_level_input_config
+            .take()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|row| !is_autopilot(row))
+            .collect();
+        let kept: Vec<SRSubLevelInputConfig> = stored
+            .and_then(|stored| stored.sub_level_input_config.as_ref())
+            .into_iter()
+            .flatten()
+            .filter(|row| is_autopilot(row) && !rows.iter().any(|own| own.same_cluster(row)))
+            .cloned()
+            .collect();
+        rows.extend(kept);
+        self.sub_level_input_config = (!rows.is_empty()).then_some(rows);
+        self
+    }
 }
 
 /// One sub-level SR override. `paymentMethod` is the payment method category (`CARD`) and
@@ -108,6 +138,30 @@ pub struct SRSubLevelInputConfig {
     pub lower_reset_factor: Option<f64>,
     pub upper_reset_factor: Option<f64>,
     pub gateway_extra_score: Option<Vec<GatewayWiseExtraScore>>,
+}
+
+impl SRSubLevelInputConfig {
+    /// Whether both rows scope the same cluster: every dimension equal, case-insensitively, with
+    /// an absent or empty dimension meaning "any".
+    fn same_cluster(&self, other: &Self) -> bool {
+        fn same(a: &Option<String>, b: &Option<String>) -> bool {
+            fn set(v: &Option<String>) -> Option<&str> {
+                v.as_deref().filter(|s| !s.is_empty())
+            }
+            match (set(a), set(b)) {
+                (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+                (None, None) => true,
+                _ => false,
+            }
+        }
+        same(&self.payment_method, &other.payment_method)
+            && same(&self.payment_method_type, &other.payment_method_type)
+            && same(&self.card_network, &other.card_network)
+            && same(&self.card_is_in, &other.card_is_in)
+            && same(&self.currency, &other.currency)
+            && same(&self.country, &other.country)
+            && same(&self.auth_type, &other.auth_type)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -193,6 +247,86 @@ mod success_rate_normalisation_tests {
             error.contains("is not a card payment method type"),
             "{error}"
         );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::panic_in_result_fn)]
+mod autopilot_row_tests {
+    use super::SuccessRateData;
+    use serde_json::json;
+
+    fn config(rows: serde_json::Value) -> Result<SuccessRateData, serde_json::Error> {
+        serde_json::from_value(json!({ "defaultBucketSize": 200, "subLevelInputConfig": rows }))
+    }
+
+    fn row(network: &str, bucket: i32, source: Option<&str>) -> serde_json::Value {
+        json!({
+            "paymentMethod": "CARD", "paymentMethodType": "DEBIT", "cardNetwork": network,
+            "currency": "USD", "authType": "THREE_DS", "source": source, "bucketSize": bucket,
+            "hedgingPercent": 20.0, "latencyThreshold": null, "lowerResetFactor": null,
+            "upperResetFactor": null, "gatewayExtraScore": null,
+        })
+    }
+
+    /// (card network, bucket size, source) of each row, in order.
+    fn rows(config: &SuccessRateData) -> Vec<(String, i32, Option<String>)> {
+        config
+            .sub_level_input_config
+            .iter()
+            .flatten()
+            .map(|row| {
+                (
+                    row.card_network.clone().unwrap_or_default(),
+                    row.bucket_size.unwrap_or_default(),
+                    row.source.clone(),
+                )
+            })
+            .collect()
+    }
+
+    fn autopilot() -> Option<String> {
+        Some("autopilot".to_string())
+    }
+
+    #[test]
+    fn an_update_without_autopilot_rows_keeps_them() -> Result<(), serde_json::Error> {
+        let stored = config(json!([row("VISA", 300, Some("autopilot"))]))?;
+        let update = config(json!([row("MASTERCARD", 50, None)]))?;
+        let merged = update.keeping_autopilot_rows(Some(&stored));
+        assert_eq!(
+            rows(&merged),
+            [
+                ("MASTERCARD".to_string(), 50, None),
+                ("VISA".to_string(), 300, autopilot()),
+            ]
+        );
+        // A client that sends no rows at all doesn't clear them either.
+        let merged = config(json!(null))?.keeping_autopilot_rows(Some(&stored));
+        assert_eq!(rows(&merged), [("VISA".to_string(), 300, autopilot())]);
+        Ok(())
+    }
+
+    #[test]
+    fn a_stale_copy_of_an_autopilot_row_does_not_revert_it() -> Result<(), serde_json::Error> {
+        // The form loaded at 250; the calibrator has since retuned the cluster to 300.
+        let stored = config(json!([row("VISA", 300, Some("autopilot"))]))?;
+        let update = config(json!([row("VISA", 250, Some("autopilot"))]))?;
+        let merged = update.keeping_autopilot_rows(Some(&stored));
+        assert_eq!(rows(&merged), [("VISA".to_string(), 300, autopilot())]);
+        // Nor does it bring back a row that Hard refresh cleared.
+        let update = config(json!([row("VISA", 250, Some("autopilot"))]))?;
+        assert!(rows(&update.keeping_autopilot_rows(None)).is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn a_human_row_for_the_cluster_takes_it_over() -> Result<(), serde_json::Error> {
+        let stored = config(json!([row("VISA", 300, Some("autopilot"))]))?;
+        let update = config(json!([row("visa", 40, None)]))?;
+        let merged = update.keeping_autopilot_rows(Some(&stored));
+        assert_eq!(rows(&merged), [("visa".to_string(), 40, None)]);
         Ok(())
     }
 }

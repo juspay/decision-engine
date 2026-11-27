@@ -38,6 +38,7 @@ import {
   type SeedCostRow,
 } from '../../hooks/useCostRouting'
 import { describeRoutingEvent, useRoutingEvents } from '../../hooks/useRoutingEvents'
+import { CONNECTOR_COLORS } from '../../lib/connectorColors'
 import { FEATURE_FLAGS } from '../../lib/featureFlags'
 import { overlayInsetClass } from '../../lib/embedMode'
 import { Play, Pause, RefreshCw, ChevronDown, ChevronUp, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings, ArrowRightLeft, Target, TrendingDown, Flag, SlidersHorizontal } from 'lucide-react'
@@ -442,9 +443,9 @@ function approachColor(approach: string): string {
 const COLORS = ['#0069ED', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
 const GW_PALETTE = ['#3b82f6', '#8b5cf6', '#f97316', '#ec4899', '#14b8a6']
 // Per-connector color overrides by name (case-insensitive), applied before the positional
-// palette so a connector keeps its color regardless of its order in the eligible list.
-// Stripe → purple, Adyen → green.
-const GW_COLOR_OVERRIDES: Record<string, string> = { stripe: '#8b5cf6', adyen: '#0abf53' }
+// palette so a connector keeps its color regardless of its order in the eligible list. Shared
+// with the other pages that draw connectors (Stripe → purple, Adyen → green, …).
+const GW_COLOR_OVERRIDES: Readonly<Record<string, string>> = CONNECTOR_COLORS
 
 // Routing events bucket at second granularity and the analytics pipeline lags a
 // little, so allow a small margin before the run-start when scoping events to a run.

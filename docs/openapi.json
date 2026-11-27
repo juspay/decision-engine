@@ -9080,31 +9080,239 @@
               "string",
               "null"
             ],
-            "description": "Omitted when absent."
+            "description": "Omitted when absent. On `calibration_applied`, the retuned cluster's dimension; on `leader_changed`, the dimension of the SR v3 cluster the change happened in (set only for dimensions the merchant scores on)."
           },
           "currency": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Omitted when absent."
+            "description": "Omitted when absent. On `calibration_applied`, the retuned cluster's dimension; on `leader_changed`, the dimension of the SR v3 cluster the change happened in (set only for dimensions the merchant scores on)."
           },
           "country": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Omitted when absent."
+            "description": "Omitted when absent. On `calibration_applied`, the retuned cluster's dimension; on `leader_changed`, the dimension of the SR v3 cluster the change happened in (set only for dimensions the merchant scores on)."
           },
           "auth_type": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Omitted when absent."
+            "description": "Omitted when absent. On `calibration_applied`, the retuned cluster's dimension; on `leader_changed`, the dimension of the SR v3 cluster the change happened in (set only for dimensions the merchant scores on)."
+          },
+          "card_is_in": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`leader_changed` only; omitted when absent. The card BIN of the SR v3 cluster, when the merchant scores on it."
+          },
+          "leader_change_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "overtaken",
+              "incumbent_stale",
+              null
+            ],
+            "description": "`leader_changed` only; omitted when absent. `overtaken`: the new leader beat a still-eligible incumbent by at least `min_score_delta`. `incumbent_stale`: the incumbent stopped being eligible (no score within the staleness horizon, or fewer than `min_transaction_count` transactions), so the best eligible gateway took over without beating it."
+          },
+          "score_before": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "`leader_changed` only; omitted when absent. The new leader's score in the bucket before the flip."
+          },
+          "previous_score_before": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "`leader_changed` only; omitted when absent. The outgoing leader's score in the bucket before the flip (`previous_score` is its score at the flip)."
+          },
+          "sr_dimension": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`leader_changed` only; omitted when absent. The SR v3 cluster the change happened in, e.g. `ORDER_PAYMENT, DEBIT, CARD, VISA, USD, THREE_DS`: the same value `/decide` reports as the success-rate dimension. Leaders are tracked per cluster, since each cluster keeps its own scores. Absent for scores recorded before clusters were, which are tracked per payment method."
           }
         },
         "description": "Fields marked 'omitted when absent' are skipped entirely rather than serialised as null."
+      },
+      "RoutingDimensionSummary": {
+        "type": "object",
+        "description": "Success-rate leadership for one SR v3 cluster (or, for scores recorded before clusters were, one (payment_method_type, payment_method) pair) over the whole window, computed from the same score series as the `leader_changed` events but not capped by `limit`.",
+        "properties": {
+          "payment_method_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payment_method": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sr_dimension": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Omitted when absent. The SR v3 cluster this summary covers, e.g. `ORDER_PAYMENT, DEBIT, CARD, VISA, USD, THREE_DS` (the success-rate dimension `/decide` reports)."
+          },
+          "trend": {
+            "description": "Omitted when absent. Each gateway's success rate and the payment volume over time, for charting: up to 120 equal slots starting where this cluster's traffic starts in the window (or at the window start when scores carry over). Slot `i` covers `start_ms + i * slot_ms` up to the next slot, clipped to the window end.",
+            "type": "object",
+            "required": ["start_ms", "slot_ms", "payments", "gateways"],
+            "properties": {
+              "start_ms": { "type": "integer", "format": "int64" },
+              "slot_ms": { "type": "integer", "format": "int64" },
+              "payments": {
+                "type": "array",
+                "description": "Score updates (one per payment outcome) recorded in each slot.",
+                "items": { "type": "integer", "format": "int64", "minimum": 0 }
+              },
+              "gateways": {
+                "type": "array",
+                "description": "One series per gateway seen in the window, in name order.",
+                "items": {
+                  "type": "object",
+                  "required": ["gateway", "scores"],
+                  "properties": {
+                    "gateway": { "type": "string" },
+                    "scores": {
+                      "type": "array",
+                      "description": "The gateway's latest score at each slot's end, or null when it had no score within the staleness horizon.",
+                      "items": { "type": ["number", "null"], "format": "double" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "leader": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The leader the detector last reported."
+          },
+          "leader_since_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "When `leader` took the lead, if that happened inside the window; null when it already led at the window start."
+          },
+          "leader_at_window_start": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who led when the window opened; null when no gateway had a fresh, eligible score then."
+          },
+          "timeline": {
+            "type": "array",
+            "description": "Who led when, in time order, covering the whole window. A dimension with more than 480 stretches is resampled into 480 equal slots, each going to whoever held most of it.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "gateway": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The leader over `[start_ms, end_ms)`; null when no gateway had a fresh, eligible score."
+                },
+                "start_ms": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "end_ms": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              }
+            }
+          },
+          "leader_change_count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Every leader change in the window, regardless of `limit`."
+          },
+          "leadership": {
+            "type": "array",
+            "description": "Time each gateway spent as leader inside the window, longest first.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "gateway": {
+                  "type": "string"
+                },
+                "leader_ms": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              }
+            }
+          },
+          "no_leader_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Window time with no eligible gateway (no fresh scores), so no one was leading."
+          },
+          "standings": {
+            "type": "array",
+            "description": "Every gateway's latest score at the end of the window, best first.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "gateway": {
+                  "type": "string"
+                },
+                "score": {
+                  "type": "number",
+                  "format": "double"
+                },
+                "transaction_count": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int64"
+                },
+                "last_seen_ms": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "eligible": {
+                  "type": "boolean",
+                  "description": "Whether the gateway could lead at the end of the window: a score within the staleness horizon backed by at least `min_transaction_count` transactions."
+                }
+              }
+            }
+          },
+          "last_activity_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The newest score snapshot seen for this dimension."
+          }
+        }
       },
       "RoutingEventsResponse": {
         "type": "object",
@@ -9126,6 +9334,23 @@
           "generated_at_ms": {
             "type": "integer",
             "format": "int64"
+          },
+          "window_start_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Start of the window the feed and `dimensions` cover."
+          },
+          "window_end_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "End of the window the feed and `dimensions` cover."
+          },
+          "dimensions": {
+            "type": "array",
+            "description": "Per-dimension leadership over the whole window. Omitted when there is no score data.",
+            "items": {
+              "$ref": "#/components/schemas/RoutingDimensionSummary"
+            }
           }
         }
       },

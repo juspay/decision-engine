@@ -249,6 +249,19 @@ pub async fn update_rule_config(
             let success_rate = success_rate
                 .normalised()
                 .map_err(error::RuleConfigurationError::InvalidPaymentMethod)?;
+            // The stored config is only read to carry the autopilot's rows over. When it can't be
+            // read, the update still applies as sent, as before.
+            let stored = config_store::get::<SrV3Input>(&merchant)
+                .await
+                .inspect_err(|error| {
+                    logger::warn!(
+                        ?error,
+                        "SR config unreadable; autopilot rows not carried over"
+                    )
+                })
+                .ok()
+                .flatten();
+            let success_rate = success_rate.keeping_autopilot_rows(stored.as_ref());
             config_store::update::<SrV3Input>(&merchant, &success_rate)
                 .await
                 .change_context(not_found)?;

@@ -217,17 +217,36 @@ struct GatewayScoreAnalyticsDetails<'a> {
     routing_approach: String,
     gateway_scoring_type: String,
     message: &'a str,
+    /// The SR v3 cluster the score belongs to (see `get_sr_v3_cluster`). Routing events
+    /// track the leader per cluster, so scores from different clusters never compete.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sr_dimension: Option<String>,
+    /// The merchant's configured dimensions in that cluster by field name, e.g.
+    /// `{"card_network": "Visa", "currency": "USD", "auth_type": "THREE_DS"}`, so analytics can
+    /// read each one without parsing the label.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sr_dimensions: Option<std::collections::BTreeMap<String, String>>,
 }
 
 fn serialize_gateway_score_analytics_details(
     routing_approach: &impl std::fmt::Debug,
     gateway_scoring_type: &impl std::fmt::Debug,
     message: &'static str,
+    cluster: Option<GU::SrV3Cluster>,
 ) -> Option<String> {
+    let (sr_dimension, sr_dimensions) = match cluster {
+        Some(cluster) => (
+            Some(cluster.label),
+            Some(cluster.dimensions.into_iter().collect()),
+        ),
+        None => (None, None),
+    };
     crate::analytics::serialize_details(&GatewayScoreAnalyticsDetails {
         routing_approach: format!("{routing_approach:?}"),
         gateway_scoring_type: format!("{gateway_scoring_type:?}"),
         message,
+        sr_dimension,
+        sr_dimensions,
     })
 }
 
@@ -1038,6 +1057,7 @@ pub async fn update_gateway_score(
                     &routing_approach,
                     &gateway_scoring_type,
                     "Gateway score updated successfully",
+                    None,
                 ),
                 payment_id: Some(txn_detail.txnUuid.clone()),
                 event_stage: Some("score_updated".to_string()),
@@ -1107,7 +1127,7 @@ pub async fn update_gateway_score(
                 let gateway_ref_id_map =
                     HashMap::from([(gateway_name.clone(), gateway_reference_id.clone())]);
                 let redis_key_map = GU::get_unified_key(
-                    gateway_scoring_data,
+                    gateway_scoring_data.clone(),
                     None,
                     T::ScoreKeyType::SrV3Key,
                     false,
@@ -1122,12 +1142,19 @@ pub async fn update_gateway_score(
                             redis_key,
                         )
                         .await;
+                    // The cluster the score was read from, keyed exactly as `/decide` keyed it.
+                    let sr_cluster = GU::get_sr_v3_cluster(&gateway_scoring_data).await;
                     crate::analytics::DomainAnalyticsEvent {
                         merchant_id: Some(merchant_id),
                         // Analytics columns in Hyperswitch's meaning: type, then category.
                         payment_method_type: Some(pm_str),
                         payment_method: Some(pmt_str),
-                        card_network: sr_routing_dimensions.card_network.clone(),
+                        // The feedback request carries no card, so take the network the
+                        // payment was scored under.
+                        card_network: sr_routing_dimensions
+                            .card_network
+                            .clone()
+                            .or_else(|| gateway_scoring_data.cardSwitchProvider.clone()),
                         card_is_in: sr_routing_dimensions.card_isin.clone(),
                         currency: sr_routing_dimensions.currency.clone(),
                         country: sr_routing_dimensions.country.clone(),
@@ -1139,6 +1166,7 @@ pub async fn update_gateway_score(
                             &routing_approach,
                             &gateway_scoring_type,
                             "Gateway score snapshot derived from sr_v3 redis score",
+                            sr_cluster,
                         ),
                         payment_id: Some(txn_detail.txnUuid.clone()),
                         event_stage: Some("score_updated".to_string()),
